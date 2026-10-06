@@ -5,11 +5,13 @@ import { ProviderCatalog, type CatalogRefreshResult, type CatalogSnapshot, type 
 import { buildUnavailableProviderModels } from "./provider.ts";
 import { buildProviderRegistration, normalizeProviderModels } from "./registration.ts";
 import type { MagpieProviderConfig } from "./types.ts";
+import { modelsEndpoint } from "./magpie.ts";
 
 export interface ProviderRuntimeOptions {
   pi: ExtensionAPI;
   config: MagpieProviderConfig;
   catalog: ProviderCatalog;
+  onDiscoveryError?: (message: string) => void;
 }
 
 export class ProviderRuntime {
@@ -50,6 +52,23 @@ export class ProviderRuntime {
       ? async () => credential.key
       : () => getDiscoveryApiKey(this.options.config.providerName);
     const result = await this.options.catalog.refresh("models", mode, keyFn, context.signal);
+    if (result.models.error) {
+      const error = result.models.error;
+      const details = error instanceof Error ? error.message : String(error);
+      const cause = error instanceof Error ? error.cause : undefined;
+      const causeDetails = cause instanceof Error
+        ? `${cause.message}${"code" in cause ? ` (${String(cause.code)})` : ""}`
+        : cause === undefined ? "" : String(cause);
+      const fallback = result.snapshot.built.models.length > 0
+        ? "Retained the last successful model snapshot."
+        : "No model snapshot is available; login-required is a placeholder, not evidence of an invalid API key.";
+      this.options.onDiscoveryError?.([
+        `Magpie model discovery failed: ${modelsEndpoint(this.options.config.baseUrl)}`,
+        `${details}${causeDetails ? `: ${causeDetails}` : ""}`,
+        fallback,
+        "Check the gateway connection, then retry with /magpie refresh.",
+      ].join("\n"));
+    }
     return normalizeProviderModels(
       result.snapshot.built.models.length > 0
         ? result.snapshot.built.models

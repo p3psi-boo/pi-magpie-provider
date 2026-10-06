@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG, loadConfig } from "../src/config.ts";
 import { ProviderCatalog } from "../src/catalog.ts";
 import { ProviderRuntime } from "../src/runtime.ts";
@@ -9,6 +9,16 @@ import { getDiscoveryApiKey } from "../src/auth.ts";
 import { registerCodexCompatiblePayloadAdapter } from "../src/codex-compat.ts";
 
 export default async function (pi: ExtensionAPI) {
+  let ui: ExtensionContext["ui"] | undefined;
+  const pendingWarnings: string[] = [];
+  const notifyDiscoveryError = (message: string) => {
+    if (ui) ui.notify(message, "warning");
+    else pendingWarnings.push(message);
+  };
+  pi.on("session_start", (_event, ctx) => {
+    ui = ctx.ui;
+    for (const message of pendingWarnings.splice(0)) ui.notify(message, "warning");
+  });
   let config = DEFAULT_CONFIG;
   try {
     const cwd = process.cwd();
@@ -17,7 +27,7 @@ export default async function (pi: ExtensionAPI) {
       config,
       getApiKey: () => getDiscoveryApiKey(config.providerName),
     });
-    const runtime = new ProviderRuntime({ pi, config, catalog });
+    const runtime = new ProviderRuntime({ pi, config, catalog, onDiscoveryError: notifyDiscoveryError });
     registerCodexCompatiblePayloadAdapter(pi, config.providerName);
     registerMagpieCommand(pi, runtime, catalog);
     await runtime.start();

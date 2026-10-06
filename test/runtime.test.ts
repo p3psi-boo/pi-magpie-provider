@@ -203,3 +203,40 @@ test("runtime refreshModels leaves publication to Pi", async () => {
   assert.equal(models[0].id, "fresh");
   assert.equal(registrations.length, 1);
 });
+
+test("failed discovery warns and retains cached models", async () => {
+  const warnings: string[] = [];
+  const runtime = new ProviderRuntime({
+    pi: { registerProvider: () => {} } as any,
+    config,
+    catalog: {
+      refresh: async () => ({
+        snapshot: snapshot("cached"),
+        models: { attempted: true, updated: false, changed: false, error: new Error("HTTP 503 Service Unavailable") },
+      }),
+    } as any,
+    onDiscoveryError: (message) => warnings.push(message),
+  });
+  const models = await runtime.refreshModels(refreshContext({ force: true }));
+  assert.equal(models[0].id, "cached");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /HTTP 503 Service Unavailable/);
+  assert.match(warnings[0], /Retained the last successful model snapshot/);
+});
+
+test("caller cancellation propagates without a discovery warning", async () => {
+  const warnings: string[] = [];
+  const controller = new AbortController();
+  const reason = new Error("caller cancelled");
+  controller.abort(reason);
+  const runtime = new ProviderRuntime({
+    pi: { registerProvider: () => {} } as any,
+    config,
+    catalog: {
+      refresh: async () => { throw reason; },
+    } as any,
+    onDiscoveryError: (message) => warnings.push(message),
+  });
+  await assert.rejects(runtime.refreshModels(refreshContext({ signal: controller.signal })), (error) => error === reason);
+  assert.equal(warnings.length, 0);
+});

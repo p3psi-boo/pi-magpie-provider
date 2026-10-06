@@ -112,6 +112,8 @@ Startup registers the provider immediately from the last-known-good local snapsh
 
 Failed refreshes retain the last-known-good snapshot. Image and video catalog entries are not registered as chat models.
 
+When automatic discovery or discovery after login fails, Pi displays a warning with the model discovery URL and error reason (including the underlying connection error when available). Warnings raised before the session UI is ready are displayed when the session starts. If no snapshot exists, the warning explains that `login-required` is a placeholder and does not establish that the API key is invalid. Check the gateway connection and retry with `/magpie refresh`.
+
 ## Test
 
 ```bash
