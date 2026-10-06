@@ -4,30 +4,25 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ProviderCatalog } from "../src/catalog.ts";
-import { cpaModelsCachePath, modelsDevCachePath } from "../src/discovery.ts";
+import { magpieModelsCachePath } from "../src/discovery.ts";
 import { writeCache } from "../src/cache.ts";
-import type { CpaProviderConfig } from "../src/types.ts";
+import type { MagpieProviderConfig } from "../src/types.ts";
 
-const config: CpaProviderConfig = {
-  providerName: "cpa-catalog-test",
-  baseUrl: "http://cliproxyapi.test/v1",
+const config: MagpieProviderConfig = {
+  providerName: "magpie-catalog-test",
+  baseUrl: "http://magpie.test/v1",
   authRequired: false,
   authHeader: false,
   headers: {},
-  modelsDevEnabled: true,
-  metadataFallbackProvider: "openrouter",
-  modelAliases: {},
   modelOverrides: {},
 };
 
-async function withTempHome<T>(fn: (home: string, fallback: string) => Promise<T>): Promise<T> {
-  const home = await mkdtemp(join(tmpdir(), "pi-cpa-catalog-"));
+async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
+  const home = await mkdtemp(join(tmpdir(), "pi-magpie-catalog-"));
   const originalHome = process.env.HOME;
   process.env.HOME = home;
-  const fallback = join(home, "models-dev-fallback.json");
-  await writeFile(fallback, JSON.stringify({ openai: { models: { fresh: { id: "fresh", name: "Fresh", reasoning: true } } } }));
   try {
-    return await fn(home, fallback);
+    return await fn(home);
   } finally {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
@@ -35,151 +30,104 @@ async function withTempHome<T>(fn: (home: string, fallback: string) => Promise<T
   }
 }
 
-function catalog(fallback: string): ProviderCatalog {
+function catalog(): ProviderCatalog {
   return new ProviderCatalog({
     config,
-    gpt56ContextWindow: "canonical",
-    bundledModelsDevPath: fallback,
     getApiKey: async () => undefined,
     backgroundTimeoutMs: 50,
   });
 }
 
 test("catalog load ignores malformed source snapshots", async () => {
-  await withTempHome(async (_home, fallback) => {
-    const path = cpaModelsCachePath(config);
+  await withTempHome(async () => {
+    const path = magpieModelsCachePath(config);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({ fetchedAt: Date.now(), data: { id: "not-an-array" } }));
 
-    const snapshot = await catalog(fallback).load();
+    const snapshot = await catalog().load();
 
-    assert.deepEqual(snapshot.cpaModels, []);
+    assert.deepEqual(snapshot.magpieModels, []);
     assert.equal(snapshot.built.stats.total, 0);
   });
 });
 
 test("catalog load is cache-first and performs no network request", async () => {
-  await withTempHome(async (_home, fallback) => {
-    await writeCache(cpaModelsCachePath(config), [{ id: "cached", owned_by: "openai" }], 1234);
+  await withTempHome(async () => {
+    await writeCache(magpieModelsCachePath(config), [{
+      id: "cached",
+      name: "cached",
+      kind: "chat",
+      reasoning: false,
+      efforts: [],
+      nativeEndpoints: [],
+      inputModalities: ["text"],
+      knowsImageInput: false,
+    }], 1234);
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => { throw new Error("network should not run"); }) as typeof fetch;
     try {
-      const snapshot = await catalog(fallback).load();
-      assert.deepEqual(snapshot.cpaModels.map((model) => model.id), ["cached"]);
-      assert.equal(snapshot.cpaUpdatedAt, 1234);
+      const snapshot = await catalog().load();
+      assert.deepEqual(snapshot.magpieModels.map((model) => model.id), ["cached"]);
+      assert.equal(snapshot.magpieUpdatedAt, 1234);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 });
 
-test("loads bundled provider-qualified metadata for first-run fallback matching", async () => {
-  await withTempHome(async (_home, fallback) => {
-    await writeFile(fallback, JSON.stringify({
-      openrouter: {
-        models: {
-          "minimax/minimax-m3": {
-            id: "minimax/minimax-m3",
-            name: "MiniMax-M3",
-            reasoning: true,
-          },
-        },
-      },
-      other: {
-        models: {
-          "minimax/minimax-m3": { id: "minimax/minimax-m3", reasoning: true },
-        },
-      },
-    }));
-    await writeCache(cpaModelsCachePath(config), [{ id: "minimax-m3", owned_by: "ken-team-litellm" }]);
-
-    const snapshot = await catalog(fallback).load();
-
-    assert.equal(snapshot.metadataSource, "bundled");
-    assert.equal(snapshot.built.models[0].name, "MiniMax-M3");
-    assert.equal(snapshot.built.models[0].reasoning, true);
-    assert.equal(snapshot.built.stats.matchMethods["provider-fallback"], 1);
-  });
-});
-
-test("ignores legacy flat metadata caches and falls back to bundled metadata", async () => {
-  await withTempHome(async (_home, fallback) => {
-    await writeFile(fallback, JSON.stringify({
-      openrouter: {
-        models: {
-          "minimax/minimax-m3": { id: "minimax/minimax-m3", name: "Bundled MiniMax", reasoning: true },
-        },
-      },
-      other: {
-        models: {
-          "minimax/minimax-m3": { id: "minimax/minimax-m3", name: "Other MiniMax", reasoning: true },
-        },
-      },
-    }));
-    await writeCache(modelsDevCachePath(), {
-      "minimax/minimax-m3": { id: "minimax/minimax-m3", name: "Legacy MiniMax", reasoning: true },
-    }, 1234);
-    await writeCache(cpaModelsCachePath(config), [{ id: "minimax-m3", owned_by: "ken-team-litellm" }]);
-
-    const snapshot = await catalog(fallback).load();
-
-    assert.equal(snapshot.metadataSource, "bundled");
-    assert.equal(snapshot.metadataUpdatedAt, undefined);
-    assert.equal(snapshot.built.models[0].name, "Bundled MiniMax");
-    assert.equal(snapshot.built.stats.matchMethods["provider-fallback"], 1);
-  });
-});
-
-test("metadata comparison ignores object key order", async () => {
-  await withTempHome(async (_home, fallback) => {
-    const instance = catalog(fallback);
+test("background refresh updates magpie models", async () => {
+  await withTempHome(async () => {
+    await writeCache(magpieModelsCachePath(config), [{
+      id: "cached",
+      name: "cached",
+      kind: "chat",
+      reasoning: false,
+      efforts: [],
+      nativeEndpoints: [],
+      inputModalities: ["text"],
+      knowsImageInput: false,
+    }]);
+    const instance = catalog();
     await instance.load();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL | Request) => {
-      assert.equal(String(url), "https://models.dev/api.json");
+      assert.equal(String(url), "http://magpie.test/v1/models");
       return new Response(JSON.stringify({
-        openai: { models: { fresh: { reasoning: true, name: "Fresh", id: "fresh" } } },
+        data: [{
+          id: "openai/gpt-6-astra",
+          display_name: "GPT-6 Astra",
+          native_endpoints: ["/v1/responses"],
+          reasoning: true,
+          supported_reasoning_levels: [{ effort: "low" }],
+        }],
       }), { status: 200 });
-    }) as typeof fetch;
-    try {
-      const result = await instance.refresh("metadata", "manual");
-      assert.equal(result.metadata.updated, true);
-      assert.equal(result.metadata.changed, false);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-});
-
-test("background refresh updates CPA models while retaining metadata", async () => {
-  await withTempHome(async (_home, fallback) => {
-    await writeCache(cpaModelsCachePath(config), [{ id: "cached", owned_by: "openai" }]);
-    const instance = catalog(fallback);
-    await instance.load();
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request) => {
-      assert.equal(String(url), "http://cliproxyapi.test/v1/models");
-      return new Response(JSON.stringify({ data: [{ id: "fresh", owned_by: "openai" }] }), { status: 200 });
     }) as typeof fetch;
     try {
       const result = await instance.refresh("models", "background");
       assert.equal(result.models.updated, true);
       assert.equal(result.models.changed, true);
-      assert.deepEqual(result.snapshot.cpaModels.map((model) => model.id), ["fresh"]);
-      assert.equal(result.snapshot.built.models[0].reasoning, true);
+      assert.deepEqual(result.snapshot.magpieModels.map((model) => model.id), ["openai/gpt-6-astra"]);
+      assert.equal(result.snapshot.built.models[0].api, "openai-responses");
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 });
 
-test("snapshot write failure preserves the in-memory CPA snapshot", async () => {
-  await withTempHome(async (_home, fallback) => {
-    await writeCache(cpaModelsCachePath(config), [{ id: "cached", owned_by: "openai" }]);
+test("snapshot write failure preserves the in-memory magpie snapshot", async () => {
+  await withTempHome(async () => {
+    await writeCache(magpieModelsCachePath(config), [{
+      id: "cached",
+      name: "cached",
+      kind: "chat",
+      reasoning: false,
+      efforts: [],
+      nativeEndpoints: [],
+      inputModalities: ["text"],
+      knowsImageInput: false,
+    }]);
     const instance = new ProviderCatalog({
       config,
-      gpt56ContextWindow: "canonical",
-      bundledModelsDevPath: fallback,
       getApiKey: async () => undefined,
       writeSnapshot: async () => { throw new Error("disk full"); },
     });
@@ -190,24 +138,33 @@ test("snapshot write failure preserves the in-memory CPA snapshot", async () => 
       const result = await instance.refresh("models", "manual");
       assert.match(String(result.models.error), /disk full/);
       assert.equal(result.models.updated, false);
-      assert.deepEqual(result.snapshot.cpaModels.map((model) => model.id), ["cached"]);
+      assert.deepEqual(result.snapshot.magpieModels.map((model) => model.id), ["cached"]);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 });
 
-test("failed background refresh preserves the last-known-good CPA snapshot", async () => {
-  await withTempHome(async (_home, fallback) => {
-    await writeCache(cpaModelsCachePath(config), [{ id: "cached", owned_by: "openai" }]);
-    const instance = catalog(fallback);
+test("failed background refresh preserves the last-known-good magpie snapshot", async () => {
+  await withTempHome(async () => {
+    await writeCache(magpieModelsCachePath(config), [{
+      id: "cached",
+      name: "cached",
+      kind: "chat",
+      reasoning: false,
+      efforts: [],
+      nativeEndpoints: [],
+      inputModalities: ["text"],
+      knowsImageInput: false,
+    }]);
+    const instance = catalog();
     await instance.load();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => { throw new Error("offline"); }) as typeof fetch;
     try {
       const result = await instance.refresh("models", "background");
       assert.match(String(result.models.error), /offline/);
-      assert.deepEqual(result.snapshot.cpaModels.map((model) => model.id), ["cached"]);
+      assert.deepEqual(result.snapshot.magpieModels.map((model) => model.id), ["cached"]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -215,8 +172,8 @@ test("failed background refresh preserves the last-known-good CPA snapshot", asy
 });
 
 test("refresh deduplicates concurrent requests", async () => {
-  await withTempHome(async (_home, fallback) => {
-    const instance = catalog(fallback);
+  await withTempHome(async () => {
+    const instance = catalog();
     await instance.load();
     const originalFetch = globalThis.fetch;
     let fetches = 0;
@@ -239,8 +196,8 @@ test("refresh deduplicates concurrent requests", async () => {
 });
 
 test("deduplicated callers can abort without cancelling the shared refresh", async () => {
-  await withTempHome(async (_home, fallback) => {
-    const instance = catalog(fallback);
+  await withTempHome(async () => {
+    const instance = catalog();
     await instance.load();
     const originalFetch = globalThis.fetch;
     let fetches = 0;
@@ -269,8 +226,8 @@ test("deduplicated callers can abort without cancelling the shared refresh", asy
 });
 
 test("refresh propagates the initiating caller's cancellation reason", async () => {
-  await withTempHome(async (_home, fallback) => {
-    const instance = catalog(fallback);
+  await withTempHome(async () => {
+    const instance = catalog();
     await instance.load();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {

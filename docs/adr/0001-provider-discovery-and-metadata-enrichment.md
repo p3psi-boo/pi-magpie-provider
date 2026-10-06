@@ -1,5 +1,7 @@
 # Use CLIProxyAPI for discovery and models.dev for metadata
 
+Superseded by [0002](./0002-magpie-v1-models-is-the-catalog.md).
+
 Accepted. The package discovers available models only from CLIProxyAPI's OpenAI-compatible `GET <baseUrl>/models` endpoint, then enriches those model IDs with models.dev metadata and user-defined metadata aliases. This avoids requiring CLIProxyAPI Management API access, keeps the proxy as the source of truth for availability, and still gives pi accurate context windows, output limits, reasoning flags, image support, and costs.
 
 ## Considered Options

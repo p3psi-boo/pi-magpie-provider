@@ -2,17 +2,13 @@ import { CONFIG_DIR_NAME, getAgentDir, SettingsManager } from "@earendil-works/p
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-export const PROVIDER_SETTINGS_NAMESPACE = "pi-cliproxyapi-provider";
-
-export type Gpt56ContextWindowMode = "canonical" | "full";
+export const PROVIDER_SETTINGS_NAMESPACE = "pi-magpie-provider";
 
 export interface ProviderSettings {
-  gpt56ContextWindow: Gpt56ContextWindowMode;
   showStrictMode: boolean;
 }
 
 export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
-  gpt56ContextWindow: "canonical",
   showStrictMode: false,
 };
 
@@ -25,17 +21,10 @@ function parseSettingsLayer(settings: unknown, scope: string): Partial<ProviderS
   }
 
   const record = namespace as Record<string, unknown>;
-  const gpt56ContextWindow = record.gpt56ContextWindow;
-  if (gpt56ContextWindow !== undefined && gpt56ContextWindow !== "canonical" && gpt56ContextWindow !== "full") {
-    throw new Error(
-      `${PROVIDER_SETTINGS_NAMESPACE}.gpt56ContextWindow must be "canonical" or "full" in ${scope} settings.json`,
-    );
-  }
   if (record.showStrictMode !== undefined && typeof record.showStrictMode !== "boolean") {
     throw new Error(`${PROVIDER_SETTINGS_NAMESPACE}.showStrictMode must be a boolean in ${scope} settings.json`);
   }
   return {
-    ...(gpt56ContextWindow !== undefined ? { gpt56ContextWindow } : {}),
     ...(record.showStrictMode !== undefined ? { showStrictMode: record.showStrictMode } : {}),
   };
 }

@@ -18,51 +18,14 @@ export interface ProviderModelOverrideLayer {
 export type ProviderModelOverrides = Record<string, ProviderModelOverride>;
 export type ProviderModelOverrideLayers = Record<string, ProviderModelOverrideLayer>;
 
-export interface CpaProviderConfig {
+export interface MagpieProviderConfig {
   providerName: string;
   baseUrl: string;
   authRequired: boolean;
   authHeader: boolean;
   headers: Record<string, string>;
-  modelsDevEnabled: boolean;
-  metadataFallbackProvider: string | null;
-  modelAliases: Record<string, string>;
   modelOverrides: ProviderModelOverrides;
 }
-
-export interface ModelsDevMetadata {
-  id: string;
-  /** models.dev provider key retained for owner-hint matching. */
-  sourceProvider?: string;
-  name?: string;
-  reasoning?: boolean;
-  modalities?: {
-    input?: string[];
-    output?: string[];
-  };
-  limit?: {
-    context?: number;
-    output?: number;
-  };
-  cost?: {
-    input?: number;
-    output?: number;
-    cache_read?: number;
-    cache_write?: number;
-    tiers?: Array<{
-      input?: number;
-      output?: number;
-      cache_read?: number;
-      cache_write?: number;
-      tier?: {
-        type?: string;
-        size?: number;
-      };
-    }>;
-  };
-}
-
-export type ModelsDevCatalog = Record<string, ModelsDevMetadata>;
 
 export interface ProviderModelConfigLike {
   id: string;
@@ -88,4 +51,8 @@ export interface ProviderModelConfigLike {
   };
   contextWindow: number;
   maxTokens: number;
+  promptCache?: {
+    short: number;
+    long?: number;
+  };
 }

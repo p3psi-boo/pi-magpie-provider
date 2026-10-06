@@ -1,23 +1,13 @@
-import type { CpaModel } from "./cpa.ts";
-import { findMetadataMatch, type MetadataMatchMethod } from "./matching.ts";
-import { getModelApiOverride, isCodexResponsesModel, type ModelApiContext } from "./model-api.ts";
-import { getModelCapabilityOverrides } from "./model-capabilities.ts";
-import type { Gpt56ContextWindowMode } from "./settings.ts";
+import type { ThinkingLevelMap } from "@earendil-works/pi-ai";
+import type { MagpieModel } from "./magpie.ts";
+import { isClaudeModel, modelApi } from "./model-api.ts";
 import type {
   InputModality,
-  ModelsDevCatalog,
-  ModelsDevMetadata,
   ProviderModelConfigLike,
   ProviderModelOverrides,
 } from "./types.ts";
 
-/**
- * Pi's conservative context window for the Codex Responses family (GPT-5.6
- * and GPT-6). models.dev advertises up to 1050000 for these models, but a
- * CLIProxyAPI route only allows that when its `max-context-length` override is
- * set, so the `gpt56ContextWindow` setting must opt in explicitly.
- */
-export const GPT_5_6_CANONICAL_CONTEXT_WINDOW = 272000;
+const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export const PI_MODEL_DEFAULTS = {
   reasoning: false,
@@ -29,79 +19,13 @@ export const PI_MODEL_DEFAULTS = {
 
 export interface BuildProviderModelsStats {
   total: number;
-  enriched: number;
-  unmatched: number;
-  matchMethods: Record<MetadataMatchMethod, number>;
-  unmatchedModelIds: string[];
+  skipped: number;
+  skippedModelIds: string[];
 }
 
 export interface BuildProviderModelsResult {
   models: ProviderModelConfigLike[];
   stats: BuildProviderModelsStats;
-}
-
-function inputFromMetadata(metadata: ModelsDevMetadata): InputModality[] {
-  const input = metadata.modalities?.input ?? [];
-  return input.includes("image") ? ["text", "image"] : ["text"];
-}
-
-function costFromMetadata(metadata: ModelsDevMetadata): ProviderModelConfigLike["cost"] {
-  const tiers = metadata.cost?.tiers?.flatMap((tier) => {
-    const threshold = tier.tier?.size;
-    if (tier.tier?.type !== "context" || typeof threshold !== "number") return [];
-    return [{
-      inputTokensAbove: threshold,
-      input: tier.input ?? 0,
-      output: tier.output ?? 0,
-      cacheRead: tier.cache_read ?? 0,
-      cacheWrite: tier.cache_write ?? 0,
-    }];
-  });
-
-  return {
-    input: metadata.cost?.input ?? 0,
-    output: metadata.cost?.output ?? 0,
-    cacheRead: metadata.cost?.cache_read ?? 0,
-    cacheWrite: metadata.cost?.cache_write ?? 0,
-    ...(tiers && tiers.length > 0 ? { tiers } : {}),
-  };
-}
-
-function contextWindowForModel(
-  context: ModelApiContext,
-  metadataContextWindow: number | undefined,
-  mode: Gpt56ContextWindowMode,
-): number {
-  if (!isCodexResponsesModel(context)) return metadataContextWindow ?? PI_MODEL_DEFAULTS.contextWindow;
-  if (mode === "full") return metadataContextWindow ?? GPT_5_6_CANONICAL_CONTEXT_WINDOW;
-  return GPT_5_6_CANONICAL_CONTEXT_WINDOW;
-}
-
-function modelFromMetadata(
-  cpaModel: CpaModel,
-  metadata: ModelsDevMetadata,
-  gpt56ContextWindow: Gpt56ContextWindowMode,
-): ProviderModelConfigLike {
-  const capabilityContext = {
-    availableModelId: cpaModel.id,
-    metadataModelId: metadata.id,
-  };
-  const capabilityOverrides = getModelCapabilityOverrides(capabilityContext);
-  const api = getModelApiOverride(capabilityContext);
-
-  return {
-    id: cpaModel.id,
-    name: metadata.name ?? cpaModel.id,
-    reasoning: capabilityOverrides.reasoning ?? metadata.reasoning ?? PI_MODEL_DEFAULTS.reasoning,
-    ...(api ? { api } : {}),
-    ...(capabilityOverrides.thinkingLevelMap
-      ? { thinkingLevelMap: capabilityOverrides.thinkingLevelMap }
-      : {}),
-    input: inputFromMetadata(metadata),
-    cost: costFromMetadata(metadata),
-    contextWindow: contextWindowForModel(capabilityContext, metadata.limit?.context, gpt56ContextWindow),
-    maxTokens: metadata.limit?.output ?? PI_MODEL_DEFAULTS.maxTokens,
-  };
 }
 
 function cloneModelDefaults(): typeof PI_MODEL_DEFAULTS {
@@ -112,31 +36,39 @@ function cloneModelDefaults(): typeof PI_MODEL_DEFAULTS {
   };
 }
 
-function defaultModel(cpaModel: CpaModel, gpt56ContextWindow: Gpt56ContextWindowMode): ProviderModelConfigLike {
-  const modelContext = { availableModelId: cpaModel.id };
-  const capabilityOverrides = getModelCapabilityOverrides(modelContext);
-  const api = getModelApiOverride(modelContext);
-
-  return {
-    id: cpaModel.id,
-    name: cpaModel.id,
-    ...cloneModelDefaults(),
-    ...capabilityOverrides,
-    ...(api ? { api } : {}),
-    contextWindow: contextWindowForModel(modelContext, undefined, gpt56ContextWindow),
-  };
+function inputFromMagpie(model: MagpieModel): InputModality[] {
+  return model.knowsImageInput && model.inputModalities.includes("image")
+    ? ["text", "image"]
+    : ["text"];
 }
 
-function emptyMatchMethods(): Record<MetadataMatchMethod, number> {
-  return {
-    alias: 0,
-    exact: 0,
-    "owner-prefix": 0,
-    "owner-hint": 0,
-    suffix: 0,
-    "normalized-suffix": 0,
-    "provider-fallback": 0,
-  };
+/**
+ * Map magpie's supported_reasoning_levels onto Pi's thinkingLevelMap.
+ * Missing Pi slots are null. Claude on Messages omits `off` so Pi still
+ * offers thinking-disabled, matching magpie's models.json writer.
+ */
+export function thinkingLevelMapFromEfforts(efforts: string[], claudeMessages: boolean): ThinkingLevelMap | undefined {
+  if (efforts.length === 0) return undefined;
+
+  const map: Record<string, string | null> = {};
+  for (const level of PI_THINKING_LEVELS) map[level] = null;
+  for (const effort of efforts) {
+    if (effort === "none") map.off = "none";
+    else if (levelIsPiThinking(effort)) map[effort] = effort;
+  }
+  if (claudeMessages && map.off === null) delete map.off;
+  return map as ThinkingLevelMap;
+}
+
+function levelIsPiThinking(effort: string): effort is typeof PI_THINKING_LEVELS[number] {
+  return (PI_THINKING_LEVELS as readonly string[]).includes(effort);
+}
+
+function promptCacheFor(model: MagpieModel, api: ProviderModelConfigLike["api"]): ProviderModelConfigLike["promptCache"] {
+  const name = model.id.slice(model.id.lastIndexOf("/") + 1).toLowerCase();
+  if (api === "anthropic-messages" && name.startsWith("claude")) return { short: 300, long: 3600 };
+  if (api === "openai-responses" && name.startsWith("gpt")) return { short: 300 };
+  return undefined;
 }
 
 function applyModelOverride(
@@ -153,45 +85,50 @@ function applyModelOverride(
   };
 }
 
+export function magpieModelToPi(model: MagpieModel, overrides: ProviderModelOverrides = {}): ProviderModelConfigLike {
+  const api = modelApi(model);
+  const claudeMessages = api === "anthropic-messages" && isClaudeModel(model.id);
+  const thinkingLevelMap = thinkingLevelMapFromEfforts(model.efforts, claudeMessages);
+  const promptCache = promptCacheFor(model, api);
+  return applyModelOverride({
+    id: model.id,
+    name: model.name,
+    reasoning: model.reasoning,
+    ...(api ? { api } : {}),
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+    input: inputFromMagpie(model),
+    cost: { ...PI_MODEL_DEFAULTS.cost },
+    contextWindow: model.contextWindow ?? PI_MODEL_DEFAULTS.contextWindow,
+    maxTokens: model.maxOutputTokens ?? PI_MODEL_DEFAULTS.maxTokens,
+    ...(promptCache ? { promptCache } : {}),
+  }, overrides);
+}
+
 export function buildUnavailableProviderModels(id = "login-required"): ProviderModelConfigLike[] {
   return [{ id, name: id, ...cloneModelDefaults() }];
 }
 
 export function buildProviderModels(
-  cpaModels: CpaModel[],
-  catalog: ModelsDevCatalog,
-  aliases: Record<string, string>,
-  gpt56ContextWindow: Gpt56ContextWindowMode = "canonical",
+  magpieModels: MagpieModel[],
   overrides: ProviderModelOverrides = {},
-  metadataFallbackProvider: string | null = "openrouter",
 ): BuildProviderModelsResult {
-  const matchMethods = emptyMatchMethods();
-  const unmatchedModelIds: string[] = [];
-  let enriched = 0;
+  const skippedModelIds: string[] = [];
+  const models: ProviderModelConfigLike[] = [];
 
-  const models = cpaModels.map((cpaModel) => {
-    const match = findMetadataMatch(cpaModel, catalog, aliases, metadataFallbackProvider);
-    if (!match) {
-      unmatchedModelIds.push(cpaModel.id);
-      return applyModelOverride(defaultModel(cpaModel, gpt56ContextWindow), overrides);
+  for (const magpieModel of magpieModels) {
+    if (magpieModel.kind !== "chat") {
+      skippedModelIds.push(magpieModel.id);
+      continue;
     }
-
-    enriched += 1;
-    matchMethods[match.method] += 1;
-    return applyModelOverride(
-      modelFromMetadata(cpaModel, match.metadata, gpt56ContextWindow),
-      overrides,
-    );
-  });
+    models.push(magpieModelToPi(magpieModel, overrides));
+  }
 
   return {
     models,
     stats: {
-      total: cpaModels.length,
-      enriched,
-      unmatched: unmatchedModelIds.length,
-      matchMethods,
-      unmatchedModelIds,
+      total: models.length,
+      skipped: skippedModelIds.length,
+      skippedModelIds,
     },
   };
 }

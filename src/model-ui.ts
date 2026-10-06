@@ -10,7 +10,7 @@ import type { ProviderCatalog } from "./catalog.ts";
 import { normalizeProviderModels } from "./registration.ts";
 import { saveProviderSettings, type ProviderSettings } from "./settings.ts";
 import type {
-  CpaProviderConfig,
+  MagpieProviderConfig,
   ProviderModelConfigLike,
   ProviderModelOverride,
   ProviderModelOverrideLayer,
@@ -121,14 +121,14 @@ function modelSelectorItems(
   });
 }
 
-type ConfigTab = "Connection" | "Models" | "Display";
+type ConfigTab = "Connection" | "Display";
 
-const CONFIG_TABS: ConfigTab[] = ["Connection", "Models", "Display"];
+const CONFIG_TABS: ConfigTab[] = ["Connection", "Display"];
 
 function providerSettingsItems(
   tab: ConfigTab,
   settings: ProviderSettings,
-  connection: CpaProviderConfig,
+  connection: MagpieProviderConfig,
 ): SettingItem[] {
   if (tab === "Connection") {
     return [{
@@ -139,15 +139,6 @@ function providerSettingsItems(
       values: ["open", "edit"],
     }];
   }
-  if (tab === "Models") return [
-    {
-      id: "gpt56ContextWindow",
-      label: "GPT-5.6 context window",
-      description: "canonical advertises 272000 tokens; full uses the models.dev limit.",
-      currentValue: settings.gpt56ContextWindow,
-      values: ["canonical", "full"],
-    },
-  ];
   return [
     {
       id: "showStrictMode",
@@ -167,10 +158,10 @@ function nextTab(tab: ConfigTab, direction: 1 | -1): ConfigTab {
 export async function openProviderConfig(
   ctx: ExtensionCommandContext,
   settings: ProviderSettings,
-  connection: CpaProviderConfig,
+  connection: MagpieProviderConfig,
 ): Promise<"connection" | undefined> {
   if (ctx.mode !== "tui") {
-    ctx.ui.notify("/cliproxyapi config requires interactive TUI mode.", "warning");
+    ctx.ui.notify("/magpie config requires interactive TUI mode.", "warning");
     return;
   }
 
@@ -186,9 +177,6 @@ export async function openProviderConfig(
         if (id === "connection" && value === "edit") {
           done("connection");
           return;
-        }
-        if (id === "gpt56ContextWindow" && (value === "canonical" || value === "full")) {
-          edited.gpt56ContextWindow = value;
         }
         if (id === "showStrictMode" && (value === "enabled" || value === "disabled")) {
           edited.showStrictMode = value === "enabled";
@@ -238,11 +226,11 @@ export async function openProviderConfig(
   if (JSON.stringify(settings) === JSON.stringify(edited)) return;
   try {
     const path = saveProviderSettings(ctx.cwd, edited);
-    ctx.ui.notify(`Saved CLIProxyAPI configuration to ${path}. Reloading Pi...`, "info");
+    ctx.ui.notify(`Saved magpie configuration to ${path}. Reloading Pi...`, "info");
     await ctx.reload();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    ctx.ui.notify(`Could not save CLIProxyAPI configuration: ${message}`, "error");
+    ctx.ui.notify(`Could not save magpie configuration: ${message}`, "error");
   }
 }
 
@@ -253,21 +241,21 @@ export async function openModelInspector(
   showStrictMode: boolean,
 ): Promise<void> {
   if (ctx.mode !== "tui") {
-    ctx.ui.notify("/cliproxyapi models requires interactive TUI mode.", "warning");
+    ctx.ui.notify("/magpie models requires interactive TUI mode.", "warning");
     return;
   }
 
   const snapshot = catalog.current() ?? await catalog.load();
   const models = normalizeProviderModels(snapshot.built.models);
   if (models.length === 0) {
-    ctx.ui.notify("No available models in the current CLIProxyAPI snapshot. Run /cliproxyapi refresh models first.", "warning");
+    ctx.ui.notify("No available models in the current magpie snapshot. Run /magpie refresh first.", "warning");
     return;
   }
 
   const selectedId = await ctx.ui.custom<string | undefined>((tui, theme, _keybindings, done) => {
     const container = new Container();
     container.addChild(new DynamicBorder((text) => theme.fg("border", text)));
-    container.addChild(new Text(theme.fg("accent", theme.bold("CLIProxyAPI models")), 1, 0));
+    container.addChild(new Text(theme.fg("accent", theme.bold("Magpie models")), 1, 0));
     container.addChild(new Text(theme.fg("muted", "Select a model to inspect or override bounded limits."), 1, 0));
     const list = new SelectList(modelSelectorItems(models, overrides, showStrictMode), Math.min(models.length, 12), {
       selectedPrefix: (text) => theme.fg("accent", text),

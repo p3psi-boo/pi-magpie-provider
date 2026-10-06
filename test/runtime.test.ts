@@ -1,17 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ProviderRuntime } from "../src/runtime.ts";
-import type { CpaProviderConfig } from "../src/types.ts";
+import type { MagpieProviderConfig } from "../src/types.ts";
 
-const config: CpaProviderConfig = {
-  providerName: "cpa",
-  baseUrl: "http://localhost:8317/v1",
+const config: MagpieProviderConfig = {
+  providerName: "magpie",
+  baseUrl: "http://127.0.0.1:3425/v1",
   authRequired: false,
   authHeader: false,
   headers: {},
-  modelsDevEnabled: true,
-  metadataFallbackProvider: "openrouter",
-  modelAliases: {},
   modelOverrides: {},
 };
 
@@ -27,10 +24,8 @@ function refreshContext(overrides: Record<string, unknown> = {}): any {
 function snapshot(id: string, reasoning = false): any {
   const model = { id, name: id, reasoning, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 16384 };
   return {
-    cpaModels: id ? [{ id }] : [],
-    metadata: {},
-    metadataSource: "bundled",
-    built: { models: id ? [model] : [], stats: { total: id ? 1 : 0, enriched: 0, unmatched: id ? 1 : 0, matchMethods: {}, unmatchedModelIds: id ? [id] : [] } },
+    magpieModels: id ? [{ id }] : [],
+    built: { models: id ? [model] : [], stats: { total: id ? 1 : 0, skipped: 0, skippedModelIds: [] } },
   };
 }
 
@@ -41,7 +36,6 @@ test("runtime registers cached models immediately and refreshes without reload",
     refresh: async () => ({
       snapshot: snapshot("fresh", true),
       models: { attempted: true, updated: true, changed: true },
-      metadata: { attempted: false, updated: false, changed: false },
     }),
   };
   const runtime = new ProviderRuntime({
@@ -74,7 +68,6 @@ test("runtime refreshModels invokes a models-only catalog refresh with network w
       return {
         snapshot: refreshed,
         models: { attempted: true, updated: true, changed: true },
-        metadata: { attempted: false, updated: false, changed: false },
       };
     },
   };
@@ -101,7 +94,6 @@ test("runtime refreshModels lets Pi publish the returned catalog without competi
     refresh: async () => ({
       snapshot: snapshot("gpt-5.6-codex", true),
       models: { attempted: true, updated: true, changed: true },
-      metadata: { attempted: false, updated: false, changed: false },
     }),
   };
   const runtime = new ProviderRuntime({
@@ -122,7 +114,6 @@ test("runtime refreshModels normalizes the unavailable fallback after an empty n
     refresh: async () => ({
       snapshot: snapshot(""),
       models: { attempted: true, updated: true, changed: true },
-      metadata: { attempted: false, updated: false, changed: false },
     }),
   };
   const runtime = new ProviderRuntime({
@@ -149,7 +140,6 @@ test("runtime refreshModels maps context.force to manual mode and passes signal"
       return {
         snapshot: snapshot("manual-fresh"),
         models: { attempted: true, updated: true, changed: true },
-        metadata: { attempted: false, updated: false, changed: false },
       };
     },
   };
@@ -176,7 +166,6 @@ test("runtime refreshModels uses Pi's effective API-key credential", async () =>
       return {
         snapshot: snapshot("credential-fresh"),
         models: { attempted: true, updated: true, changed: true },
-        metadata: { attempted: false, updated: false, changed: false },
       };
     },
   };
@@ -200,7 +189,6 @@ test("runtime refreshModels leaves publication to Pi", async () => {
     refresh: async () => ({
       snapshot: snapshot("fresh"),
       models: { attempted: true, updated: true, changed: true },
-      metadata: { attempted: false, updated: false, changed: false },
     }),
   };
   const runtime = new ProviderRuntime({

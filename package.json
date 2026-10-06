@@ -1,7 +1,7 @@
 {
-  "name": "pi-cliproxyapi-provider",
-  "version": "0.15.54",
-  "description": "Pi provider package for CLIProxyAPI with automatic model discovery and models.dev enrichment.",
+  "name": "pi-magpie-provider",
+  "version": "0.1.0",
+  "description": "Pi provider package for a magpie gateway, discovering models from GET /v1/models.",
   "type": "module",
   "license": "MIT",
   "private": false,
@@ -9,9 +9,8 @@
     "pi-package",
     "pi-extension",
     "pi",
-    "cliproxyapi",
-    "provider",
-    "models.dev"
+    "magpie",
+    "provider"
   ],
   "repository": {
     "type": "git",
@@ -24,7 +23,6 @@
   "files": [
     "src",
     "extensions",
-    "data",
     "README.md",
     "LICENSE"
   ],
@@ -35,10 +33,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.ts",
-    "test:unit": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test",
-    "update:models-dev": "node scripts/update-models-dev-fallback.mjs"
+    "check": "npm run typecheck && npm test"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.84.0",

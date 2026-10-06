@@ -2,47 +2,45 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type {
-  CpaProviderConfig,
+  MagpieProviderConfig,
   ProviderModelOverride,
   ProviderModelOverrideLayer,
   ProviderModelOverrideLayers,
   ProviderModelOverrides,
 } from "./types.ts";
 
-export type ConfigLayer = Partial<CpaProviderConfig>;
+export type ConfigLayer = Partial<MagpieProviderConfig>;
 
+const PACKAGE_DIR_NAME = "pi-magpie-provider";
 export const CONTEXT_WINDOW_PRESETS = [128000, 272000, 512000, 1000000] as const;
 export const MAX_TOKEN_PRESETS = [4096, 8192, 16384, 32768, 65536, 128000] as const;
 
-export const DEFAULT_CONFIG: CpaProviderConfig = {
-  providerName: "cpa",
-  baseUrl: "http://localhost:8317/v1",
+export const DEFAULT_CONFIG: MagpieProviderConfig = {
+  providerName: "magpie",
+  baseUrl: "http://127.0.0.1:3425/v1",
   authRequired: true,
   authHeader: true,
   headers: {},
-  modelsDevEnabled: true,
-  metadataFallbackProvider: "openrouter",
-  modelAliases: {},
   modelOverrides: {},
 };
 
 export function globalConfigPath(): string {
-  return join(homedir(), ".pi", "agent", "pi-cliproxyapi-provider", "config.json");
+  return join(homedir(), ".pi", "agent", PACKAGE_DIR_NAME, "config.json");
 }
 
 export function projectConfigPath(cwd: string): string {
-  return join(cwd, ".pi", "pi-cliproxyapi-provider", "config.json");
+  return join(cwd, ".pi", PACKAGE_DIR_NAME, "config.json");
 }
 
 export function cacheDir(): string {
-  return join(homedir(), ".cache", "pi-cliproxyapi-provider");
+  return join(homedir(), ".cache", PACKAGE_DIR_NAME);
 }
 
-export function providerCacheKey(config: Pick<CpaProviderConfig, "providerName" | "baseUrl">): string {
+export function providerCacheKey(config: Pick<MagpieProviderConfig, "providerName" | "baseUrl">): string {
   return Buffer.from(`${config.providerName}\n${config.baseUrl}`).toString("base64url");
 }
 
-export function parseBooleanEnv(value: string | undefined): boolean | undefined {
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
   if (value === undefined) return undefined;
   const normalized = value.trim().toLowerCase();
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
@@ -50,25 +48,16 @@ export function parseBooleanEnv(value: string | undefined): boolean | undefined 
   return undefined;
 }
 
-function normalizeMetadataFallbackProvider(value: string | null): string | null {
-  return value?.trim().toLowerCase() === "none" ? null : value;
-}
-
-function normalizeConfig(config: CpaProviderConfig): CpaProviderConfig {
+function normalizeConfig(config: MagpieProviderConfig): MagpieProviderConfig {
   return {
     ...config,
     authHeader: config.authRequired ? config.authHeader : false,
-    metadataFallbackProvider: normalizeMetadataFallbackProvider(config.metadataFallbackProvider),
   };
 }
 
 function safeProjectConfig(projectConfig?: ConfigLayer): ConfigLayer | undefined {
   if (!projectConfig) return undefined;
   return {
-    ...(projectConfig.metadataFallbackProvider !== undefined
-      ? { metadataFallbackProvider: projectConfig.metadataFallbackProvider }
-      : {}),
-    ...(projectConfig.modelAliases !== undefined ? { modelAliases: projectConfig.modelAliases } : {}),
     ...(projectConfig.modelOverrides !== undefined ? { modelOverrides: projectConfig.modelOverrides } : {}),
   };
 }
@@ -98,16 +87,6 @@ function projectConfigLayer(value: unknown, path: string): ConfigLayer {
   }
 
   const record = value as Record<string, unknown>;
-  if (
-    record.metadataFallbackProvider !== undefined &&
-    record.metadataFallbackProvider !== null &&
-    (typeof record.metadataFallbackProvider !== "string" || !record.metadataFallbackProvider.trim())
-  ) {
-    throw new Error(`metadataFallbackProvider must be a non-empty string or null in project config file: ${path}`);
-  }
-  if (record.modelAliases !== undefined && !isStringMap(record.modelAliases)) {
-    throw new Error(`modelAliases must be an object with string values in project config file: ${path}`);
-  }
   const modelOverrides = record.modelOverrides === undefined
     ? undefined
     : parseModelOverrides(record.modelOverrides, "project");
@@ -115,29 +94,24 @@ function projectConfigLayer(value: unknown, path: string): ConfigLayer {
   return safeProjectConfig({ ...record, ...(modelOverrides ? { modelOverrides } : {}) } as ConfigLayer) ?? {};
 }
 
-function mergeLayer(base: CpaProviderConfig, layer?: ConfigLayer): CpaProviderConfig {
+function mergeLayer(base: MagpieProviderConfig, layer?: ConfigLayer): MagpieProviderConfig {
   if (!layer) return base;
   return {
     ...base,
     ...layer,
     headers: { ...base.headers, ...(layer.headers ?? {}) },
-    modelAliases: { ...base.modelAliases, ...(layer.modelAliases ?? {}) },
     modelOverrides: mergeModelOverrides(base.modelOverrides, layer.modelOverrides),
   };
 }
 
 function envLayer(env: NodeJS.ProcessEnv): ConfigLayer {
-  const authRequired = parseBooleanEnv(env.CLIPROXYAPI_AUTH_REQUIRED);
-  const authHeader = parseBooleanEnv(env.CLIPROXYAPI_AUTH_HEADER);
-  const modelsDevEnabled = parseBooleanEnv(env.CLIPROXYAPI_MODELS_DEV_ENABLED);
-  const metadataFallbackProvider = env.CLIPROXYAPI_METADATA_FALLBACK_PROVIDER?.trim();
+  const authRequired = parseBooleanEnv(env.PI_MAGPIE_AUTH_REQUIRED);
+  const authHeader = parseBooleanEnv(env.PI_MAGPIE_AUTH_HEADER);
   return {
-    ...(env.CLIPROXYAPI_BASE_URL ? { baseUrl: env.CLIPROXYAPI_BASE_URL } : {}),
-    ...(env.CLIPROXYAPI_PROVIDER_NAME ? { providerName: env.CLIPROXYAPI_PROVIDER_NAME } : {}),
+    ...(env.PI_MAGPIE_BASE_URL ? { baseUrl: env.PI_MAGPIE_BASE_URL } : {}),
+    ...(env.PI_MAGPIE_PROVIDER_NAME ? { providerName: env.PI_MAGPIE_PROVIDER_NAME } : {}),
     ...(authRequired !== undefined ? { authRequired } : {}),
     ...(authHeader !== undefined ? { authHeader } : {}),
-    ...(modelsDevEnabled !== undefined ? { modelsDevEnabled } : {}),
-    ...(metadataFallbackProvider ? { metadataFallbackProvider } : {}),
   };
 }
 
@@ -145,7 +119,7 @@ export function mergeConfigLayers(
   globalConfig?: ConfigLayer,
   projectConfig?: ConfigLayer,
   env: NodeJS.ProcessEnv = process.env,
-): CpaProviderConfig {
+): MagpieProviderConfig {
   const envConfig = envLayer(env);
   return normalizeConfig(mergeLayer(mergeLayer(mergeLayer(DEFAULT_CONFIG, globalConfig), safeProjectConfig(projectConfig)), envConfig));
 }
@@ -213,15 +187,8 @@ function validateConfigLayer(value: unknown, path: string): ConfigLayer {
       throw new Error(`${field} must be a string in config file: ${path}`);
     }
   }
-  if (
-    record.metadataFallbackProvider !== undefined &&
-    record.metadataFallbackProvider !== null &&
-    (typeof record.metadataFallbackProvider !== "string" || !record.metadataFallbackProvider.trim())
-  ) {
-    throw new Error(`metadataFallbackProvider must be a non-empty string or null in config file: ${path}`);
-  }
 
-  const booleanFields = ["authRequired", "authHeader", "modelsDevEnabled"];
+  const booleanFields = ["authRequired", "authHeader"];
   for (const field of booleanFields) {
     if (record[field] !== undefined && typeof record[field] !== "boolean") {
       throw new Error(`${field} must be a boolean in config file: ${path}`);
@@ -230,9 +197,6 @@ function validateConfigLayer(value: unknown, path: string): ConfigLayer {
 
   if (record.headers !== undefined && !isStringMap(record.headers)) {
     throw new Error(`headers must be an object with string values in config file: ${path}`);
-  }
-  if (record.modelAliases !== undefined && !isStringMap(record.modelAliases)) {
-    throw new Error(`modelAliases must be an object with string values in config file: ${path}`);
   }
   const modelOverrides = record.modelOverrides === undefined
     ? undefined
@@ -251,7 +215,7 @@ export function readProjectConfigFile(path: string): ConfigLayer | undefined {
   return projectConfigLayer(JSON.parse(readFileSync(path, "utf8")), path);
 }
 
-export function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): CpaProviderConfig {
+export function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): MagpieProviderConfig {
   return mergeConfigLayers(readConfigFile(globalConfigPath()), readProjectConfigFile(projectConfigPath(cwd)), env);
 }
 

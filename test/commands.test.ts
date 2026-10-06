@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cliproxyapiArgumentCompletions, registerCliproxyapiCommand } from "../src/commands.ts";
+import { magpieArgumentCompletions, registerMagpieCommand } from "../src/commands.ts";
 
 test("slash command argument completions include labels for pi autocomplete", () => {
-  const completions = cliproxyapiArgumentCompletions("sta");
+  const completions = magpieArgumentCompletions("sta");
 
   assert.deepEqual(completions, [{ value: "status", label: "status" }]);
 });
 
 test("help documents every advertised command without requiring an available provider", async () => {
   let command: any;
-  registerCliproxyapiCommand({
+  registerMagpieCommand({
     registerCommand: (_name: string, definition: any) => { command = definition; },
   } as any);
   const notifications: Array<{ message: string; level: string }> = [];
@@ -23,19 +23,19 @@ test("help documents every advertised command without requiring an available pro
   await command.handler("help", ctx);
 
   assert.equal(notifications[0].level, "info");
-  for (const value of ["status", "refresh", "refresh models", "refresh metadata", "aliases", "models", "config", "config connection", "help"]) {
-    assert.match(notifications[0].message, new RegExp(`/cliproxyapi ${value.replace(" ", "\\s+")}`));
+  for (const value of ["status", "refresh", "models", "config", "config connection", "help"]) {
+    assert.match(notifications[0].message, new RegExp(`/magpie ${value.replace(" ", "\\s+")}`));
   }
 });
 
 test("models and connection configuration are advertised for slash-command autocomplete", () => {
-  assert.deepEqual(cliproxyapiArgumentCompletions("mod"), [{ value: "models", label: "models" }]);
-  assert.deepEqual(cliproxyapiArgumentCompletions("config c"), [{ value: "config connection", label: "config connection" }]);
+  assert.deepEqual(magpieArgumentCompletions("mod"), [{ value: "models", label: "models" }]);
+  assert.deepEqual(magpieArgumentCompletions("config c"), [{ value: "config connection", label: "config connection" }]);
 });
 
 test("models reports its TUI requirement instead of being treated as an unknown command", async () => {
   let command: any;
-  registerCliproxyapiCommand({
+  registerMagpieCommand({
     registerCommand: (_name: string, definition: any) => { command = definition; },
   } as any, {} as any, {
     current: () => undefined,
@@ -56,7 +56,7 @@ test("models reports its TUI requirement instead of being treated as an unknown 
 
 test("models rejects RPC mode even when UI notifications are available", async () => {
   let command: any;
-  registerCliproxyapiCommand({
+  registerMagpieCommand({
     registerCommand: (_name: string, definition: any) => { command = definition; },
   } as any, {} as any, {
     current: () => { throw new Error("catalog should not load outside TUI mode"); },
@@ -76,7 +76,7 @@ test("models rejects RPC mode even when UI notifications are available", async (
 
 test("config rejects RPC mode even when UI notifications are available", async () => {
   let command: any;
-  registerCliproxyapiCommand({
+  registerMagpieCommand({
     registerCommand: (_name: string, definition: any) => { command = definition; },
   } as any);
   const notifications: Array<{ message: string; level: string }> = [];
@@ -94,7 +94,7 @@ test("config rejects RPC mode even when UI notifications are available", async (
 
 test("an empty command shows help", async () => {
   let command: any;
-  registerCliproxyapiCommand({
+  registerMagpieCommand({
     registerCommand: (_name: string, definition: any) => { command = definition; },
   } as any);
   const notifications: string[] = [];
@@ -103,12 +103,12 @@ test("an empty command shows help", async () => {
     ui: { notify: (message: string) => notifications.push(message) },
   } as any);
 
-  assert.match(notifications[0], /CLIProxyAPI provider commands:/);
+  assert.match(notifications[0], /Magpie provider commands:/);
 });
 
 test("an unknown command shows full usage and identifies the command", async () => {
   let command: any;
-  registerCliproxyapiCommand({
+  registerMagpieCommand({
     registerCommand: (_name: string, definition: any) => { command = definition; },
   } as any);
   const notifications: Array<{ message: string; level: string }> = [];
@@ -120,6 +120,6 @@ test("an unknown command shows full usage and identifies the command", async () 
   } as any);
 
   assert.equal(notifications[0].level, "warning");
-  assert.match(notifications[0].message, /CLIProxyAPI provider commands:/);
+  assert.match(notifications[0].message, /Magpie provider commands:/);
   assert.match(notifications[0].message, /Unknown command: wut/);
 });

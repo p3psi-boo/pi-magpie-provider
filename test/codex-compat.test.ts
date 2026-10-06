@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { rewriteCodexCompatibleToolPayload } from "../src/codex-compat.ts";
 
-const cpaResponsesModel = { provider: "cpa", api: "openai-responses" as const };
+const magpieResponsesModel = { provider: "magpie", api: "openai-responses" as const };
 
-test("publishes Codex-compatible null strict markers for CPA Responses function tools", () => {
+test("publishes Codex-compatible null strict markers for magpie Responses function tools", () => {
   const functionTool = {
     type: "function",
     name: "interactive_shell",
@@ -21,8 +21,8 @@ test("publishes Codex-compatible null strict markers for CPA Responses function 
 
   const rewritten = rewriteCodexCompatibleToolPayload(
     { model: "gpt-5.6-sol", tools: [functionTool, customTool] },
-    cpaResponsesModel,
-    "cpa",
+    magpieResponsesModel,
+    "magpie",
   ) as { tools: Array<Record<string, unknown>> };
 
   assert.equal(rewritten.tools[0]?.strict, null);
@@ -30,15 +30,15 @@ test("publishes Codex-compatible null strict markers for CPA Responses function 
   assert.deepEqual(rewritten.tools[1], customTool);
 });
 
-test("leaves non-CPA and non-Responses requests unchanged", () => {
+test("leaves non-magpie and non-Responses requests unchanged", () => {
   const payload = { tools: [{ type: "function", name: "test", strict: false }] };
 
-  assert.equal(rewriteCodexCompatibleToolPayload(payload, { provider: "openai", api: "openai-responses" }, "cpa"), undefined);
-  assert.equal(rewriteCodexCompatibleToolPayload(payload, { provider: "cpa", api: "openai-completions" }, "cpa"), undefined);
+  assert.equal(rewriteCodexCompatibleToolPayload(payload, { provider: "openai", api: "openai-responses" }, "magpie"), undefined);
+  assert.equal(rewriteCodexCompatibleToolPayload(payload, { provider: "magpie", api: "openai-completions" }, "magpie"), undefined);
 });
 
 test("does not allocate a replacement when function tools already use null strict markers", () => {
   const payload = { tools: [{ type: "function", name: "test", strict: null }] };
 
-  assert.equal(rewriteCodexCompatibleToolPayload(payload, cpaResponsesModel, "cpa"), undefined);
+  assert.equal(rewriteCodexCompatibleToolPayload(payload, magpieResponsesModel, "magpie"), undefined);
 });

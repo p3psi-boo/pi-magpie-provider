@@ -24,7 +24,7 @@ test("config command saves global config and reloads pi", async () => {
       reload: async () => { reloads += 1; },
     } as any);
 
-    const config = JSON.parse(await readFile(join(home, ".pi", "agent", "pi-cliproxyapi-provider", "config.json"), "utf8"));
+    const config = JSON.parse(await readFile(join(home, ".pi", "agent", "pi-magpie-provider", "config.json"), "utf8"));
     assert.equal(config.providerName, "cpa-test");
     assert.equal(config.baseUrl, "http://example.test/v1");
     assert.equal(reloads, 1);
@@ -39,7 +39,7 @@ test("config command saves global config and reloads pi", async () => {
 test("config command keeps existing global values when input is empty", async () => {
   const home = await mkdtemp(join(tmpdir(), "pi-cpa-config-command-keep-"));
   const originalHome = process.env.HOME;
-  const configDir = join(home, ".pi", "agent", "pi-cliproxyapi-provider");
+  const configDir = join(home, ".pi", "agent", "pi-magpie-provider");
   const configPath = join(configDir, "config.json");
   const existing = { providerName: "existing-provider", baseUrl: "http://existing.test/v1", authRequired: false, authHeader: false };
 
@@ -74,7 +74,7 @@ test("config command keeps existing global values when input is empty", async ()
 test("config command redacts secret-like existing global config fields", async () => {
   const home = await mkdtemp(join(tmpdir(), "pi-cpa-config-command-redact-"));
   const originalHome = process.env.HOME;
-  const configDir = join(home, ".pi", "agent", "pi-cliproxyapi-provider");
+  const configDir = join(home, ".pi", "agent", "pi-magpie-provider");
   const configPath = join(configDir, "config.json");
   const notifications: string[] = [];
 

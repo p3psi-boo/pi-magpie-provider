@@ -6,8 +6,8 @@ import { DEFAULT_CONFIG } from "../src/config.ts";
 test("status failure includes configuration and next steps", () => {
   const message = formatStatusFailure(DEFAULT_CONFIG, new TypeError("fetch failed"));
 
-  assert.match(message, /CLIProxyAPI status failed: fetch failed/);
-  assert.match(message, /Provider: cpa/);
-  assert.match(message, /Base URL: http:\/\/localhost:8317\/v1/);
-  assert.match(message, /Run \/cliproxyapi config/);
+  assert.match(message, /Magpie status failed: fetch failed/);
+  assert.match(message, /Provider: magpie/);
+  assert.match(message, /Base URL: http:\/\/127\.0\.0\.1:3425\/v1/);
+  assert.match(message, /Run \/magpie config/);
 });

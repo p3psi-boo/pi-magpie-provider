@@ -4,11 +4,11 @@ import { getDiscoveryApiKey } from "./auth.ts";
 import { ProviderCatalog, type CatalogRefreshResult, type CatalogSnapshot, type RefreshTarget } from "./catalog.ts";
 import { buildUnavailableProviderModels } from "./provider.ts";
 import { buildProviderRegistration, normalizeProviderModels } from "./registration.ts";
-import type { CpaProviderConfig } from "./types.ts";
+import type { MagpieProviderConfig } from "./types.ts";
 
 export interface ProviderRuntimeOptions {
   pi: ExtensionAPI;
-  config: CpaProviderConfig;
+  config: MagpieProviderConfig;
   catalog: ProviderCatalog;
 }
 
@@ -32,7 +32,7 @@ export class ProviderRuntime {
     getDiscoveryApiKey?: () => Promise<string | undefined>,
   ): Promise<CatalogRefreshResult> {
     const result = await this.options.catalog.refresh(target, mode, getDiscoveryApiKey);
-    if (result.models.updated || result.metadata.updated) this.register(result.snapshot, false);
+    if (result.models.updated) this.register(result.snapshot, false);
     return result;
   }
 
@@ -50,8 +50,6 @@ export class ProviderRuntime {
       ? async () => credential.key
       : () => getDiscoveryApiKey(this.options.config.providerName);
     const result = await this.options.catalog.refresh("models", mode, keyFn, context.signal);
-    // Pi publishes refreshModels' return value synchronously. Registering here as
-    // well would create a second, competing catalog publication.
     return normalizeProviderModels(
       result.snapshot.built.models.length > 0
         ? result.snapshot.built.models

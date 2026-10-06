@@ -17,27 +17,24 @@ test("merges defaults, global config, project config, and environment overrides"
     {
       baseUrl: "http://global.example/v1",
       providerName: "global",
-      modelAliases: { a: "openai/a" },
       modelOverrides: { a: { reasoning: false, contextWindow: 128000 } },
     },
     {
       providerName: "project",
-      modelAliases: { b: "openai/b" },
       modelOverrides: { a: { contextWindow: 272000 }, b: { maxTokens: 32768 } },
       authRequired: false,
     },
     {
-      CLIPROXYAPI_BASE_URL: "http://env.example/v1",
-      CLIPROXYAPI_PROVIDER_NAME: "env-provider",
-      CLIPROXYAPI_AUTH_HEADER: "false"
-    }
+      PI_MAGPIE_BASE_URL: "http://env.example/v1",
+      PI_MAGPIE_PROVIDER_NAME: "env-provider",
+      PI_MAGPIE_AUTH_HEADER: "false",
+    },
   );
 
   assert.equal(config.baseUrl, "http://env.example/v1");
   assert.equal(config.providerName, "env-provider");
   assert.equal(config.authRequired, true);
   assert.equal(config.authHeader, false);
-  assert.deepEqual(config.modelAliases, { a: "openai/a", b: "openai/b" });
   assert.deepEqual(config.modelOverrides, {
     a: { reasoning: false, contextWindow: 272000 },
     b: { maxTokens: 32768 },
@@ -47,35 +44,11 @@ test("merges defaults, global config, project config, and environment overrides"
 test("uses safe default config", () => {
   const config = mergeConfigLayers(undefined, undefined, {});
 
-  assert.equal(config.providerName, "cpa");
+  assert.equal(config.providerName, "magpie");
   assert.equal(config.baseUrl, DEFAULT_CONFIG.baseUrl);
   assert.equal(config.authRequired, true);
   assert.equal(config.authHeader, true);
-  assert.equal(config.metadataFallbackProvider, "openrouter");
   assert.deepEqual(config.modelOverrides, {});
-});
-
-test("allows metadata fallback provider overrides and disabling", () => {
-  assert.equal(
-    mergeConfigLayers({ metadataFallbackProvider: "other" }, undefined, {}).metadataFallbackProvider,
-    "other",
-  );
-  assert.equal(
-    mergeConfigLayers({ metadataFallbackProvider: null }, undefined, {}).metadataFallbackProvider,
-    null,
-  );
-  assert.equal(
-    mergeConfigLayers({ metadataFallbackProvider: "NoNe" }, undefined, {}).metadataFallbackProvider,
-    null,
-  );
-  assert.equal(
-    mergeConfigLayers(undefined, { metadataFallbackProvider: "none" }, {}).metadataFallbackProvider,
-    null,
-  );
-  assert.equal(
-    mergeConfigLayers(undefined, undefined, { CLIPROXYAPI_METADATA_FALLBACK_PROVIDER: "none" }).metadataFallbackProvider,
-    null,
-  );
 });
 
 test("normalizes authHeader off when authRequired is false", () => {
@@ -94,10 +67,9 @@ test("ignores project connection and auth fields", () => {
       authRequired: false,
       authHeader: false,
       headers: { Authorization: "Bearer leaked" },
-      modelAliases: { local: "openai/local" },
       modelOverrides: { local: { reasoning: true, maxTokens: 8192 } },
     },
-    {}
+    {},
   );
 
   assert.equal(config.baseUrl, "http://trusted.example/v1");
@@ -105,25 +77,22 @@ test("ignores project connection and auth fields", () => {
   assert.equal(config.authRequired, true);
   assert.equal(config.authHeader, true);
   assert.deepEqual(config.headers, { "X-Global": "yes" });
-  assert.deepEqual(config.modelAliases, { local: "openai/local" });
   assert.deepEqual(config.modelOverrides, { local: { reasoning: true, maxTokens: 8192 } });
 });
 
 test("project config reader ignores unsupported malformed fields", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-cpa-project-config-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-magpie-project-config-"));
   const path = join(dir, "config.json");
 
   try {
     await writeFile(path, JSON.stringify({
       baseUrl: 123,
       headers: null,
-      modelAliases: { local: "openai/local" },
       modelOverrides: { local: { contextWindow: 272000 } },
     }));
 
     const config = mergeConfigLayers(undefined, readProjectConfigFile(path), {});
 
-    assert.deepEqual(config.modelAliases, { local: "openai/local" });
     assert.deepEqual(config.modelOverrides, { local: { contextWindow: 272000 } });
     assert.equal(config.baseUrl, DEFAULT_CONFIG.baseUrl);
   } finally {
@@ -132,7 +101,7 @@ test("project config reader ignores unsupported malformed fields", async () => {
 });
 
 test("rejects unsafe or malformed model overrides", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-cpa-config-overrides-invalid-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-magpie-config-overrides-invalid-"));
   const path = join(dir, "config.json");
 
   try {
@@ -152,7 +121,7 @@ test("rejects unsafe or malformed model overrides", async () => {
 });
 
 test("project null overrides restore catalog defaults instead of inherited globals", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-cpa-project-tombstones-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-magpie-project-tombstones-"));
   const path = join(dir, "config.json");
   try {
     await writeFile(path, JSON.stringify({
@@ -171,10 +140,10 @@ test("project null overrides restore catalog defaults instead of inherited globa
 });
 
 test("model override saves target the project layer and preserve global provenance", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-cpa-save-override-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-magpie-save-override-"));
   try {
     const path = projectConfigPath(cwd);
-    await mkdir(join(cwd, ".pi", "pi-cliproxyapi-provider"), { recursive: true });
+    await mkdir(join(cwd, ".pi", "pi-magpie-provider"), { recursive: true });
     saveModelOverride(cwd, "model", { contextWindow: null, maxTokens: 65536 });
 
     assert.equal(path, projectConfigPath(cwd));
@@ -190,27 +159,21 @@ test("environment overrides global endpoint even when project endpoint is ignore
   const config = mergeConfigLayers(
     { baseUrl: "http://trusted.example/v1" },
     { baseUrl: "https://attacker.example/v1" },
-    { CLIPROXYAPI_BASE_URL: "http://env-trusted.example/v1" }
+    { PI_MAGPIE_BASE_URL: "http://env-trusted.example/v1" },
   );
 
   assert.equal(config.baseUrl, "http://env-trusted.example/v1");
 });
 
 test("rejects malformed config values with actionable errors", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "pi-cpa-config-invalid-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-magpie-config-invalid-"));
   const path = join(dir, "config.json");
 
   try {
     await writeFile(path, JSON.stringify({ headers: null }));
     assert.throws(
       () => readConfigFile(path),
-      /headers must be an object with string values/
-    );
-
-    await writeFile(path, JSON.stringify({ metadataFallbackProvider: "" }));
-    assert.throws(
-      () => readConfigFile(path),
-      /metadataFallbackProvider must be a non-empty string or null/
+      /headers must be an object with string values/,
     );
   } finally {
     await rm(dir, { recursive: true, force: true });

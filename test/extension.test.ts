@@ -6,7 +6,7 @@ import { join } from "node:path";
 import extension from "../extensions/index.ts";
 
 async function withTempCwd<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-cpa-extension-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-magpie-extension-"));
   const originalCwd = process.cwd();
   try {
     process.chdir(cwd);
@@ -18,15 +18,21 @@ async function withTempCwd<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
 }
 
 test("extension registers provider with refreshModels capability", async () => {
-  const home = await mkdtemp(join(tmpdir(), "pi-cpa-extension-lifecycle-home-"));
+  const home = await mkdtemp(join(tmpdir(), "pi-magpie-extension-lifecycle-home-"));
   const originalHome = process.env.HOME;
   const originalFetch = globalThis.fetch;
 
   try {
     process.env.HOME = home;
     globalThis.fetch = (async (url: string | URL | Request) => {
-      assert.equal(String(url), "http://localhost:8317/v1/models");
-      return new Response(JSON.stringify({ data: [{ id: "fresh-model" }] }), { status: 200 });
+      assert.equal(String(url), "http://127.0.0.1:3425/v1/models");
+      return new Response(JSON.stringify({
+        data: [{
+          id: "fresh-model",
+          native_endpoints: ["/v1/responses"],
+          context_window: 272000,
+        }],
+      }), { status: 200 });
     }) as typeof fetch;
 
     await withTempCwd(async () => {
@@ -46,6 +52,8 @@ test("extension registers provider with refreshModels capability", async () => {
         publish: async () => true,
       });
       assert.equal(refreshed[0].id, "fresh-model");
+      assert.equal(refreshed[0].api, "openai-responses");
+      assert.equal(refreshed[0].contextWindow, 272000);
       assert.equal(refreshed[0].compat?.supportsStrictMode, false);
       assert.equal(providers.length, 1);
     });
@@ -57,48 +65,8 @@ test("extension registers provider with refreshModels capability", async () => {
   }
 });
 
-test("extension applies the full GPT-5.6 context window from settings.json", async () => {
-  const home = await mkdtemp(join(tmpdir(), "pi-cpa-extension-settings-home-"));
-  const originalHome = process.env.HOME;
-  const originalFetch = globalThis.fetch;
-
-  try {
-    process.env.HOME = home;
-    const agentDir = join(home, ".pi", "agent");
-    await mkdir(agentDir, { recursive: true });
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-      "pi-cliproxyapi-provider": { gpt56ContextWindow: "full" },
-    }));
-    globalThis.fetch = (async () => new Response(JSON.stringify({
-      data: [{ id: "gpt-5.6-sol", owned_by: "openai" }],
-    }), { status: 200 })) as typeof fetch;
-
-    await withTempCwd(async () => {
-      const providers: Array<{ name: string; config: any }> = [];
-      await extension({
-        registerCommand: () => {},
-        registerProvider: (name: string, config: any) => providers.push({ name, config }),
-        on: () => {},
-      } as any);
-
-      const refreshed = await providers[0].config.refreshModels({
-        allowNetwork: true,
-        signal: new AbortController().signal,
-        publish: async () => true,
-      });
-      const model = refreshed.find((entry: any) => entry.id === "gpt-5.6-sol");
-      assert.equal(model?.contextWindow, 1050000);
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    await rm(home, { recursive: true, force: true });
-  }
-});
-
 test("manual refresh uses the active model registry credential", async () => {
-  const home = await mkdtemp(join(tmpdir(), "pi-cpa-extension-refresh-home-"));
+  const home = await mkdtemp(join(tmpdir(), "pi-magpie-extension-refresh-home-"));
   const originalHome = process.env.HOME;
   const originalFetch = globalThis.fetch;
 
@@ -123,11 +91,11 @@ test("manual refresh uses the active model registry credential", async () => {
       } as any);
 
       const notifications: Array<{ message: string; level: string }> = [];
-      await commandHandler?.("refresh models", {
+      await commandHandler?.("refresh", {
         cwd,
         modelRegistry: {
           getApiKeyForProvider: async (providerName: string) => {
-            assert.equal(providerName, "cpa");
+            assert.equal(providerName, "magpie");
             return "runtime-key";
           },
         },
@@ -149,13 +117,13 @@ test("manual refresh uses the active model registry credential", async () => {
 });
 
 test("extension registers placeholder provider when global config is invalid", async () => {
-  const home = await mkdtemp(join(tmpdir(), "pi-cpa-extension-home-"));
+  const home = await mkdtemp(join(tmpdir(), "pi-magpie-extension-home-"));
   const originalHome = process.env.HOME;
 
   try {
     process.env.HOME = home;
     await withTempCwd(async () => {
-      const configDir = join(home, ".pi", "agent", "pi-cliproxyapi-provider");
+      const configDir = join(home, ".pi", "agent", "pi-magpie-provider");
       await mkdir(configDir, { recursive: true });
       await writeFile(join(configDir, "config.json"), JSON.stringify({ headers: null }));
 
@@ -167,7 +135,7 @@ test("extension registers placeholder provider when global config is invalid", a
       } as any);
 
       assert.equal(providers.length, 1);
-      assert.equal(providers[0].name, "cpa");
+      assert.equal(providers[0].name, "magpie");
       assert.equal(providers[0].config.models[0].id, "login-required");
       assert.equal(providers[0].config.models[0].compat.supportsStrictMode, false);
     });

@@ -11,13 +11,13 @@ function errorText(error: unknown): string {
 
 export function formatStatusFailure(config: ReturnType<typeof loadConfig>, error: unknown): string {
   return [
-    `CLIProxyAPI status failed: ${errorText(error)}`,
+    `Magpie status failed: ${errorText(error)}`,
     `Provider: ${config.providerName}`,
     `Base URL: ${config.baseUrl}`,
     `Auth required: ${config.authRequired ? "yes" : "no"}`,
     "",
-    "Run /cliproxyapi config to set the CLIProxyAPI base URL.",
-    `If you just ran /login ${config.providerName}, run /cliproxyapi refresh models.`,
+    "Run /magpie config to set the magpie gateway base URL.",
+    `If you just ran /login ${config.providerName}, run /magpie refresh.`,
   ].join("\n");
 }
 
@@ -45,7 +45,7 @@ function capabilityCount(snapshot: CatalogSnapshot, key: "reasoning" | "image"):
 
 export async function runConfig(ctx: ExtensionCommandContext): Promise<void> {
   if (!ctx.hasUI) {
-    ctx.ui.notify("/cliproxyapi config connection requires an interactive UI.", "warning");
+    ctx.ui.notify("/magpie config connection requires an interactive UI.", "warning");
     return;
   }
 
@@ -53,7 +53,7 @@ export async function runConfig(ctx: ExtensionCommandContext): Promise<void> {
   try {
     current = loadConfig(ctx.cwd);
   } catch (error) {
-    ctx.ui.notify(`Existing CLIProxyAPI config is invalid; using defaults for repair: ${errorText(error)}`, "warning");
+    ctx.ui.notify(`Existing magpie config is invalid; using defaults for repair: ${errorText(error)}`, "warning");
   }
 
   const path = globalConfigPath();
@@ -61,7 +61,7 @@ export async function runConfig(ctx: ExtensionCommandContext): Promise<void> {
   try {
     existing = readConfigFile(path);
   } catch (error) {
-    ctx.ui.notify(`Existing global CLIProxyAPI config is invalid and will be replaced if you save: ${errorText(error)}`, "warning");
+    ctx.ui.notify(`Existing global magpie config is invalid and will be replaced if you save: ${errorText(error)}`, "warning");
   }
   const defaults = existing ?? current;
 
@@ -69,16 +69,16 @@ export async function runConfig(ctx: ExtensionCommandContext): Promise<void> {
 
   const providerNameInput = await ctx.ui.input(`Provider name (leave blank to keep: ${defaults.providerName})`, `leave blank to keep ${defaults.providerName}`);
   if (providerNameInput === undefined) return;
-  const baseUrlInput = await ctx.ui.input(`CLIProxyAPI base URL (leave blank to keep: ${defaults.baseUrl})`, `leave blank to keep ${defaults.baseUrl}`);
+  const baseUrlInput = await ctx.ui.input(`Magpie gateway base URL (leave blank to keep: ${defaults.baseUrl})`, `leave blank to keep ${defaults.baseUrl}`);
   if (baseUrlInput === undefined) return;
   const authRequired = await ctx.ui.confirm(
     `Require /login credentials? (current: ${defaults.authRequired ? "yes" : "no"})`,
-    "Choose yes unless this CLIProxyAPI instance accepts unauthenticated requests.",
+    "Choose yes unless this magpie gateway accepts unauthenticated requests. Docker and LAN sharing usually need a gateway key.",
   );
   const authHeader = authRequired
     ? await ctx.ui.confirm(
         `Send Authorization bearer header? (current: ${defaults.authHeader ? "yes" : "no"})`,
-        "Choose yes for CLIProxyAPI API keys.",
+        "Choose yes for magpie gateway keys.",
       )
     : false;
 
@@ -89,21 +89,20 @@ export async function runConfig(ctx: ExtensionCommandContext): Promise<void> {
     authRequired,
     authHeader,
   });
-  ctx.ui.notify(`Saved CLIProxyAPI config to ${path}. Reloading pi to apply connection changes...`, "info");
+  ctx.ui.notify(`Saved magpie config to ${path}. Reloading pi to apply connection changes...`, "info");
   await ctx.reload();
 }
 
 function statusText(config: ReturnType<typeof loadConfig>, snapshot: CatalogSnapshot): string {
   return [
-    `CLIProxyAPI provider: ${config.providerName}`,
+    `Magpie provider: ${config.providerName}`,
     `Base URL: ${config.baseUrl}`,
     `Auth required: ${config.authRequired ? "yes" : "no"}`,
-    `Models: ${snapshot.built.stats.total} (${snapshot.built.stats.enriched} enriched, ${snapshot.built.stats.unmatched} unmatched)`,
+    `Chat models: ${snapshot.built.stats.total}`,
+    ...(snapshot.built.stats.skipped > 0 ? [`Skipped image/video models: ${snapshot.built.stats.skipped}`] : []),
     `Reasoning models: ${capabilityCount(snapshot, "reasoning")}`,
     `Image-capable models: ${capabilityCount(snapshot, "image")}`,
-    `CPA snapshot: ${age(snapshot.cpaUpdatedAt)}`,
-    `models.dev metadata: ${snapshot.metadataSource}${snapshot.metadataUpdatedAt ? `, ${age(snapshot.metadataUpdatedAt)}` : ""}`,
-    `GPT-5.6 context window: ${snapshot.gpt56ContextWindow === "full" ? "full models.dev limit" : "canonical 272000"}`,
+    `Magpie snapshot: ${age(snapshot.magpieUpdatedAt)}`,
   ].join("\n");
 }
 
@@ -114,60 +113,55 @@ function refreshPart(label: string, result: SourceRefreshResult): string {
 }
 
 function parseRefreshTarget(value: string | undefined): RefreshTarget | undefined {
-  if (!value || value === "all") return "all";
-  if (value === "models") return "models";
-  if (value === "metadata") return "metadata";
+  if (!value || value === "all" || value === "models") return "all";
   return undefined;
 }
 
-const CLIPROXYAPI_HELP = [
-  "CLIProxyAPI provider commands:",
-  "  /cliproxyapi status            Show provider and model-catalog status",
-  "  /cliproxyapi refresh           Refresh CPA models and models.dev metadata",
-  "  /cliproxyapi refresh models    Refresh CPA models only",
-  "  /cliproxyapi refresh metadata  Refresh models.dev metadata only",
-  "  /cliproxyapi aliases           Show unmatched model IDs for alias configuration",
-  "  /cliproxyapi models            Inspect models and set bounded overrides",
-  "  /cliproxyapi config            Configure model behavior and display",
-  "  /cliproxyapi config connection Configure provider endpoint and auth",
-  "  /cliproxyapi help              Show this help",
+const MAGPIE_HELP = [
+  "Magpie provider commands:",
+  "  /magpie status            Show provider and model-catalog status",
+  "  /magpie refresh           Refresh models from GET /v1/models",
+  "  /magpie models            Inspect models and set bounded overrides",
+  "  /magpie config            Configure display options",
+  "  /magpie config connection Configure gateway endpoint and auth",
+  "  /magpie help              Show this help",
 ].join("\n");
 
-export function cliproxyapiArgumentCompletions(prefix: string): Array<{ value: string; label: string }> {
-  return ["config", "config connection", "status", "refresh", "refresh models", "refresh metadata", "aliases", "models", "help"]
+export function magpieArgumentCompletions(prefix: string): Array<{ value: string; label: string }> {
+  return ["config", "config connection", "status", "refresh", "models", "help"]
     .filter((item) => item.startsWith(prefix))
     .map((value) => ({ value, label: value }));
 }
 
-export function registerCliproxyapiCommand(pi: ExtensionAPI, runtime?: ProviderRuntime, catalog?: ProviderCatalog): void {
-  pi.registerCommand("cliproxyapi", {
-    description: "Configure, refresh, and inspect the CLIProxyAPI provider.",
+export function registerMagpieCommand(pi: ExtensionAPI, runtime?: ProviderRuntime, catalog?: ProviderCatalog): void {
+  pi.registerCommand("magpie", {
+    description: "Configure, refresh, and inspect the magpie provider.",
     getArgumentCompletions(prefix) {
-      return cliproxyapiArgumentCompletions(prefix);
+      return magpieArgumentCompletions(prefix);
     },
     async handler(args, ctx) {
       const commandArgs = args.trim();
       const [subcommand, option] = commandArgs ? commandArgs.split(/\s+/) : ["help"];
       if (subcommand === "help") {
-        ctx.ui.notify(CLIPROXYAPI_HELP, "info");
+        ctx.ui.notify(MAGPIE_HELP, "info");
         return;
       }
       if (subcommand === "config") {
         if (option === "connection") return runConfig(ctx);
         if (option) {
-          ctx.ui.notify("Usage: /cliproxyapi config [connection]", "warning");
+          ctx.ui.notify("Usage: /magpie config [connection]", "warning");
           return;
         }
         const action = await openProviderConfig(ctx, loadProviderSettings(ctx.cwd), loadConfig(ctx.cwd));
         if (action === "connection") return runConfig(ctx);
         return;
       }
-      if (!["status", "refresh", "aliases", "models"].includes(subcommand)) {
-        ctx.ui.notify(`${CLIPROXYAPI_HELP}\n\nUnknown command: ${subcommand}`, "warning");
+      if (!["status", "refresh", "models"].includes(subcommand)) {
+        ctx.ui.notify(`${MAGPIE_HELP}\n\nUnknown command: ${subcommand}`, "warning");
         return;
       }
       if (!runtime || !catalog) {
-        ctx.ui.notify("CLIProxyAPI provider is unavailable. Run /cliproxyapi config and reload pi.", "error");
+        ctx.ui.notify("Magpie provider is unavailable. Run /magpie config and reload pi.", "error");
         return;
       }
       const config = loadConfig(ctx.cwd);
@@ -179,29 +173,16 @@ export function registerCliproxyapiCommand(pi: ExtensionAPI, runtime?: ProviderR
       if (subcommand === "refresh") {
         const target = parseRefreshTarget(option);
         if (!target) {
-          ctx.ui.notify("Usage: /cliproxyapi refresh [models|metadata]", "warning");
+          ctx.ui.notify("Usage: /magpie refresh", "warning");
           return;
         }
-        const getDiscoveryApiKey = target === "metadata"
-          ? undefined
-          : () => ctx.modelRegistry.getApiKeyForProvider(config.providerName);
-        const result = await runtime.refresh(target, "manual", getDiscoveryApiKey);
-        const level = result.models.error || result.metadata.error ? "warning" : "info";
+        const result = await runtime.refresh(target, "manual", () => ctx.modelRegistry.getApiKeyForProvider(config.providerName));
+        const level = result.models.error ? "warning" : "info";
         ctx.ui.notify([
-          "CLIProxyAPI provider refresh complete.",
-          refreshPart("CPA models", result.models),
-          refreshPart("models.dev metadata", result.metadata),
-          `Registered: ${result.snapshot.built.stats.total} models, ${result.snapshot.built.stats.enriched} enriched, ${result.snapshot.built.stats.unmatched} unmatched.`,
+          "Magpie provider refresh complete.",
+          refreshPart("Magpie models", result.models),
+          `Registered: ${result.snapshot.built.stats.total} chat models.`,
         ].join("\n"), level);
-        return;
-      }
-      if (subcommand === "aliases") {
-        const snapshot = catalog.current() ?? await catalog.load();
-        const sample = snapshot.built.stats.unmatchedModelIds.slice(0, 30);
-        const body = sample.length === 0
-          ? "All CPA models matched models.dev metadata."
-          : `Unmatched CPA models (${snapshot.built.stats.unmatched}):\n${sample.map((id) => `  "${id}": "<models.dev-id>"`).join("\n")}`;
-        ctx.ui.notify(body, snapshot.built.stats.unmatched ? "warning" : "info");
         return;
       }
       if (subcommand === "models") {

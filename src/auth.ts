@@ -4,8 +4,8 @@ export async function getDiscoveryApiKey(providerName: string, env: NodeJS.Proce
   try {
     const credential = await readStoredCredential(providerName);
     if (credential?.type === "api_key") return credential.key;
-    return env.CLIPROXYAPI_API_KEY;
+    return env.PI_MAGPIE_API_KEY;
   } catch {
-    return env.CLIPROXYAPI_API_KEY;
+    return env.PI_MAGPIE_API_KEY;
   }
 }
