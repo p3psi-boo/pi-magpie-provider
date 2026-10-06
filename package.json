@@ -14,12 +14,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/0xRichardH/pi-cliproxyapi-provider.git"
+    "url": "git+https://github.com/p3psi-boo/pi-magpie-provider.git"
   },
   "bugs": {
-    "url": "https://github.com/0xRichardH/pi-cliproxyapi-provider/issues"
+    "url": "https://github.com/p3psi-boo/pi-magpie-provider/issues"
   },
-  "homepage": "https://github.com/0xRichardH/pi-cliproxyapi-provider#readme",
+  "homepage": "https://github.com/p3psi-boo/pi-magpie-provider#readme",
   "files": [
     "src",
     "extensions",

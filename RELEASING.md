@@ -1,19 +1,15 @@
 # Release guide
 
-Publish from a clean local `master` after tests pass. The published version must be unique on npm.
+Release from a clean local `master` after checks pass. Users install this plugin from GitHub, not npm.
 
-## Prerequisites
-
-- Publish access to the `pi-magpie-provider` package on npm
-- A clean local `master` branch
+## Check
 
 ```bash
 npm ci
-npm test
-npm pack --dry-run
+npm run check
 ```
 
-## Publish
+## Release
 
 Choose the semantic version increment:
 
@@ -23,29 +19,15 @@ Choose the semantic version increment:
 
 ```bash
 npm version patch
-npm publish --access public
 git push origin master --follow-tags
 ```
 
-Replace `patch` with `minor` or `major` when appropriate. `npm version` updates `package.json` and `package-lock.json`, and creates a matching `vX.Y.Z` git tag.
-
-The first release creates the npm package. Sign in with `npm login` before `npm publish`.
+Replace `patch` with `minor` or `major` when appropriate. `npm version` updates `package.json` and `package-lock.json`, and creates a matching `vX.Y.Z` git tag. Do not publish the plugin to npm.
 
 ## Verify
 
 ```bash
-npm view pi-magpie-provider
-pi install npm:pi-magpie-provider
+pi install git:github.com/p3psi-boo/pi-magpie-provider@master
 ```
 
-The package should appear at <https://pi.dev/packages/pi-magpie-provider> after the gallery indexes the npm release.
-
-## Troubleshooting
-
-### npm reports that the version already exists
-
-npm versions are immutable. Increment the package version, create a new tag, and publish again.
-
-### The package is absent from pi.dev
-
-Confirm that npm published the package publicly and that `package.json` contains the `pi-package` keyword. Gallery indexing may take some time.
+Restart Pi and run `/magpie status` to verify that the plugin loads.

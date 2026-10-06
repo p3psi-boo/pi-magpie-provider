@@ -6,16 +6,10 @@ This is the path for Docker and remote magpie. Magpie running on the same machin
 
 ## Install
 
-Install from npm:
+Install from GitHub:
 
 ```bash
-pi install npm:pi-magpie-provider
-```
-
-Or install from GitHub:
-
-```bash
-pi install git:github.com/0xRichardH/pi-cliproxyapi-provider@master
+pi install git:github.com/p3psi-boo/pi-magpie-provider@master
 ```
 
 Restart pi after installing, then run:
@@ -122,4 +116,4 @@ npm test
 
 ## Release
 
-See [RELEASING.md](RELEASING.md) for versioning, `npm publish`, and troubleshooting.
+See [RELEASING.md](RELEASING.md) for versioning and GitHub releases.
