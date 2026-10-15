@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { runConfig } from "../src/commands.ts";
 
 test("config command saves global config and reloads pi", async () => {
@@ -18,7 +18,9 @@ test("config command saves global config and reloads pi", async () => {
       hasUI: true,
       ui: {
         input: async (title: string) => title.startsWith("Provider name") ? "cpa-test" : "http://example.test/v1",
-        confirm: async () => true,
+        confirm: async () => {
+          throw new Error("connection setup should not ask auth questions");
+        },
         notify: (message: string) => notifications.push(message),
       },
       reload: async () => { reloads += 1; },

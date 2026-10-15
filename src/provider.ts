@@ -28,14 +28,6 @@ export interface BuildProviderModelsResult {
   stats: BuildProviderModelsStats;
 }
 
-function cloneModelDefaults(): typeof PI_MODEL_DEFAULTS {
-  return {
-    ...PI_MODEL_DEFAULTS,
-    input: [...PI_MODEL_DEFAULTS.input],
-    cost: { ...PI_MODEL_DEFAULTS.cost },
-  };
-}
-
 function inputFromMagpie(model: MagpieModel): InputModality[] {
   return model.knowsImageInput && model.inputModalities.includes("image")
     ? ["text", "image"]
@@ -102,10 +94,6 @@ export function magpieModelToPi(model: MagpieModel, overrides: ProviderModelOver
     maxTokens: model.maxOutputTokens ?? PI_MODEL_DEFAULTS.maxTokens,
     ...(promptCache ? { promptCache } : {}),
   }, overrides);
-}
-
-export function buildUnavailableProviderModels(id = "login-required"): ProviderModelConfigLike[] {
-  return [{ id, name: id, ...cloneModelDefaults() }];
 }
 
 export function buildProviderModels(

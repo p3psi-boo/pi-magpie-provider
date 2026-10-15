@@ -29,35 +29,48 @@ function snapshot(id: string, reasoning = false): any {
   };
 }
 
-test("runtime registers cached models immediately and refreshes without reload", async () => {
-  const registrations: any[] = [];
-  const catalog = {
-    load: async () => snapshot("cached"),
+function catalogState(initial: any) {
+  let current = initial;
+  return {
+    current: () => current,
+    load: async () => current,
+    ingest: async () => current,
     refresh: async () => ({
-      snapshot: snapshot("fresh", true),
+      snapshot: current,
       models: { attempted: true, updated: true, changed: true },
     }),
+    set(next: any) { current = next; },
   };
+}
+
+test("runtime registers cached models immediately and refreshes without reload", async () => {
+  const registrations: any[] = [];
+  const catalog = catalogState(snapshot("cached"));
   const runtime = new ProviderRuntime({
-    pi: { registerProvider: (name: string, provider: any) => registrations.push({ name, provider }) } as any,
+    pi: { registerProvider: (provider: any) => registrations.push(provider) } as any,
     config,
     catalog: catalog as any,
   });
 
   await runtime.start();
+  assert.equal(registrations.length, 1);
+  assert.equal(runtime.provider.getModels()[0].id, "cached");
+  assert.equal(runtime.provider.getModels()[0].compat.supportsStrictMode, false);
+
+  catalog.set(snapshot("fresh", true));
   await runtime.refresh("models", "background");
 
   assert.equal(registrations.length, 2);
-  assert.equal(registrations[0].provider.models[0].id, "cached");
-  assert.equal(registrations[0].provider.models[0].compat.supportsStrictMode, false);
-  assert.equal(registrations[1].provider.models[0].id, "fresh");
-  assert.equal(registrations[1].provider.models[0].reasoning, true);
-  assert.equal(registrations[1].provider.models[0].compat.supportsStrictMode, false);
+  assert.equal(runtime.provider.getModels()[0].id, "fresh");
+  assert.equal(runtime.provider.getModels()[0].reasoning, true);
 });
 
 test("runtime refreshModels invokes a models-only catalog refresh with network when allowNetwork is true", async () => {
+  let current = snapshot("cached");
   const catalog = {
-    load: async () => snapshot("cached"),
+    current: () => current,
+    load: async () => current,
+    ingest: async () => current,
     refresh: async (target: string, mode: string, _getApiKey: any, signal?: AbortSignal) => {
       assert.equal(target, "models");
       assert.equal(mode, "background");
@@ -65,6 +78,7 @@ test("runtime refreshModels invokes a models-only catalog refresh with network w
       const refreshed = snapshot("network-fresh");
       refreshed.built.models[0].api = "openai-responses";
       refreshed.built.models[0].compat = { supportsStrictMode: true };
+      current = refreshed;
       return {
         snapshot: refreshed,
         models: { attempted: true, updated: true, changed: true },
@@ -77,20 +91,22 @@ test("runtime refreshModels invokes a models-only catalog refresh with network w
     catalog: catalog as any,
   });
 
-  const cachedModels = await runtime.refreshModels(refreshContext({ allowNetwork: false }));
-  assert.equal(cachedModels[0].id, "cached");
-  assert.equal((cachedModels[0].compat as { supportsStrictMode?: boolean })?.supportsStrictMode, false);
+  await runtime.provider.refreshModels!(refreshContext({ allowNetwork: false }));
+  assert.equal(runtime.provider.getModels()[0].id, "cached");
+  assert.equal((runtime.provider.getModels()[0].compat as { supportsStrictMode?: boolean })?.supportsStrictMode, false);
 
-  const freshModels = await runtime.refreshModels(refreshContext());
-  assert.equal(freshModels[0].id, "network-fresh");
-  assert.equal(freshModels[0].api, "openai-responses");
-  assert.equal((freshModels[0].compat as { supportsStrictMode?: boolean })?.supportsStrictMode, false);
+  await runtime.provider.refreshModels!(refreshContext());
+  assert.equal(runtime.provider.getModels()[0].id, "network-fresh");
+  assert.equal(runtime.provider.getModels()[0].api, "openai-responses");
+  assert.equal((runtime.provider.getModels()[0].compat as { supportsStrictMode?: boolean })?.supportsStrictMode, false);
 });
 
 test("runtime refreshModels lets Pi publish the returned catalog without competing registration", async () => {
   let registrations = 0;
   const catalog = {
+    current: () => snapshot("gpt-5.6-codex", true),
     load: async () => snapshot("cached"),
+    ingest: async () => snapshot("cached"),
     refresh: async () => ({
       snapshot: snapshot("gpt-5.6-codex", true),
       models: { attempted: true, updated: true, changed: true },
@@ -102,17 +118,19 @@ test("runtime refreshModels lets Pi publish the returned catalog without competi
     catalog: catalog as any,
   });
 
-  const models = await runtime.refreshModels({ allowNetwork: true } as any);
-
-  assert.equal(models[0].id, "gpt-5.6-codex");
+  await runtime.provider.refreshModels!(refreshContext());
   assert.equal(registrations, 0);
+  assert.equal(runtime.provider.getModels()[0].id, "gpt-5.6-codex");
 });
 
-test("runtime refreshModels normalizes the unavailable fallback after an empty network refresh", async () => {
+test("runtime refreshModels publishes an empty catalog after an empty network refresh", async () => {
+  const empty = snapshot("");
   const catalog = {
+    current: () => empty,
     load: async () => snapshot("cached"),
+    ingest: async () => empty,
     refresh: async () => ({
-      snapshot: snapshot(""),
+      snapshot: empty,
       models: { attempted: true, updated: true, changed: true },
     }),
   };
@@ -122,18 +140,25 @@ test("runtime refreshModels normalizes the unavailable fallback after an empty n
     catalog: catalog as any,
   });
 
-  const models = await runtime.refreshModels(refreshContext());
+  let persisted: any;
+  await runtime.provider.refreshModels!(refreshContext({
+    publish: async (publication: any) => {
+      persisted = publication.persist;
+      return true;
+    },
+  }));
 
-  assert.equal(models[0].id, "login-required");
-  assert.equal((models[0].compat as { supportsStrictMode?: boolean })?.supportsStrictMode, false);
+  assert.deepEqual(persisted.models, []);
+  assert.equal(runtime.provider.getModels().length, 0);
 });
 
 test("runtime refreshModels maps context.force to manual mode and passes signal", async () => {
   let receivedMode: string | undefined;
   let receivedSignal: AbortSignal | undefined;
-
   const catalog = {
+    current: () => snapshot("manual-fresh"),
     load: async () => snapshot("cached"),
+    ingest: async () => snapshot("cached"),
     refresh: async (_target: string, mode: string, _getApiKey: any, signal?: AbortSignal) => {
       receivedMode = mode;
       receivedSignal = signal;
@@ -150,17 +175,18 @@ test("runtime refreshModels maps context.force to manual mode and passes signal"
   });
 
   const controller = new AbortController();
-  const models = await runtime.refreshModels(refreshContext({ force: true, signal: controller.signal }));
+  await runtime.provider.refreshModels!(refreshContext({ force: true, signal: controller.signal }));
 
   assert.equal(receivedMode, "manual");
   assert.equal(receivedSignal, controller.signal);
-  assert.equal(models[0].id, "manual-fresh");
 });
 
 test("runtime refreshModels uses Pi's effective API-key credential", async () => {
   let receivedApiKey: string | undefined;
   const catalog = {
+    current: () => snapshot("credential-fresh"),
     load: async () => snapshot("cached"),
+    ingest: async () => snapshot("cached"),
     refresh: async (_target: string, _mode: string, getApiKey: () => Promise<string | undefined>) => {
       receivedApiKey = await getApiKey();
       return {
@@ -175,7 +201,7 @@ test("runtime refreshModels uses Pi's effective API-key credential", async () =>
     catalog: catalog as any,
   });
 
-  await runtime.refreshModels(refreshContext({
+  await runtime.provider.refreshModels!(refreshContext({
     credential: { type: "api_key", key: "runtime-key" },
   }));
 
@@ -184,41 +210,40 @@ test("runtime refreshModels uses Pi's effective API-key credential", async () =>
 
 test("runtime refreshModels leaves publication to Pi", async () => {
   const registrations: any[] = [];
-  const catalog = {
-    load: async () => snapshot("cached"),
-    refresh: async () => ({
-      snapshot: snapshot("fresh"),
-      models: { attempted: true, updated: true, changed: true },
-    }),
-  };
+  const catalog = catalogState(snapshot("cached"));
   const runtime = new ProviderRuntime({
-    pi: { registerProvider: (...args: any[]) => registrations.push(args) } as any,
+    pi: { registerProvider: (provider: any) => registrations.push(provider) } as any,
     config,
     catalog: catalog as any,
   });
 
   await runtime.start();
-  const models = await runtime.refreshModels(refreshContext());
+  catalog.set(snapshot("fresh"));
+  await runtime.provider.refreshModels!(refreshContext());
 
-  assert.equal(models[0].id, "fresh");
+  assert.equal(runtime.provider.getModels()[0].id, "fresh");
   assert.equal(registrations.length, 1);
 });
 
 test("failed discovery warns and retains cached models", async () => {
   const warnings: string[] = [];
+  const cached = snapshot("cached");
   const runtime = new ProviderRuntime({
     pi: { registerProvider: () => {} } as any,
     config,
     catalog: {
+      current: () => cached,
+      load: async () => cached,
+      ingest: async () => cached,
       refresh: async () => ({
-        snapshot: snapshot("cached"),
+        snapshot: cached,
         models: { attempted: true, updated: false, changed: false, error: new Error("HTTP 503 Service Unavailable") },
       }),
     } as any,
     onDiscoveryError: (message) => warnings.push(message),
   });
-  const models = await runtime.refreshModels(refreshContext({ force: true }));
-  assert.equal(models[0].id, "cached");
+  await runtime.provider.refreshModels!(refreshContext({ force: true }));
+  assert.equal(runtime.provider.getModels()[0].id, "cached");
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /HTTP 503 Service Unavailable/);
   assert.match(warnings[0], /Retained the last successful model snapshot/);
@@ -233,10 +258,13 @@ test("caller cancellation propagates without a discovery warning", async () => {
     pi: { registerProvider: () => {} } as any,
     config,
     catalog: {
+      current: () => snapshot("cached"),
+      load: async () => snapshot("cached"),
+      ingest: async () => snapshot("cached"),
       refresh: async () => { throw reason; },
     } as any,
     onDiscoveryError: (message) => warnings.push(message),
   });
-  await assert.rejects(runtime.refreshModels(refreshContext({ signal: controller.signal })), (error) => error === reason);
+  await assert.rejects(runtime.provider.refreshModels!(refreshContext({ signal: controller.signal })), (error) => error === reason);
   assert.equal(warnings.length, 0);
 });

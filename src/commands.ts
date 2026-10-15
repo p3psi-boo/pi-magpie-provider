@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_CONFIG, loadConfig, globalConfigPath, readConfigFile, writeConfigFile, type ConfigLayer } from "./config.ts";
+import { DEFAULT_CONFIG, loadConfig, globalConfigPath, normalizeMagpieBaseUrl, readConfigFile, writeConfigFile, type ConfigLayer } from "./config.ts";
 import type { ProviderCatalog, CatalogSnapshot, RefreshTarget, SourceRefreshResult } from "./catalog.ts";
 import type { ProviderRuntime } from "./runtime.ts";
 import { openModelInspector, openProviderConfig } from "./model-ui.ts";
@@ -16,8 +16,7 @@ export function formatStatusFailure(config: ReturnType<typeof loadConfig>, error
     `Base URL: ${config.baseUrl}`,
     `Auth required: ${config.authRequired ? "yes" : "no"}`,
     "",
-    "Run /magpie config to set the magpie gateway base URL.",
-    `If you just ran /login ${config.providerName}, run /magpie refresh.`,
+    `Run /login ${config.providerName} to set the gateway URL and API key.`,
   ].join("\n");
 }
 
@@ -71,25 +70,13 @@ export async function runConfig(ctx: ExtensionCommandContext): Promise<void> {
   if (providerNameInput === undefined) return;
   const baseUrlInput = await ctx.ui.input(`Magpie gateway base URL (leave blank to keep: ${defaults.baseUrl})`, `leave blank to keep ${defaults.baseUrl}`);
   if (baseUrlInput === undefined) return;
-  const authRequired = await ctx.ui.confirm(
-    `Require /login credentials? (current: ${defaults.authRequired ? "yes" : "no"})`,
-    "Choose yes unless this magpie gateway accepts unauthenticated requests. Docker and LAN sharing usually need a gateway key.",
-  );
-  const authHeader = authRequired
-    ? await ctx.ui.confirm(
-        `Send Authorization bearer header? (current: ${defaults.authHeader ? "yes" : "no"})`,
-        "Choose yes for magpie gateway keys.",
-      )
-    : false;
 
   writeConfigFile(path, {
     ...existing,
     providerName: providerNameInput || defaults.providerName,
-    baseUrl: baseUrlInput || defaults.baseUrl,
-    authRequired,
-    authHeader,
+    baseUrl: normalizeMagpieBaseUrl(baseUrlInput || defaults.baseUrl, defaults.baseUrl),
   });
-  ctx.ui.notify(`Saved magpie config to ${path}. Reloading pi to apply connection changes...`, "info");
+  ctx.ui.notify(`Saved magpie config to ${path}. Reloading pi to apply connection changes. Run /login ${providerNameInput || defaults.providerName} if this gateway needs a key.`, "info");
   await ctx.reload();
 }
 
@@ -119,11 +106,12 @@ function parseRefreshTarget(value: string | undefined): RefreshTarget | undefine
 
 const MAGPIE_HELP = [
   "Magpie provider commands:",
+  "  /login magpie             Set gateway URL and API key (Pi login)",
   "  /magpie status            Show provider and model-catalog status",
   "  /magpie refresh           Refresh models from GET /v1/models",
   "  /magpie models            Inspect models and set bounded overrides",
   "  /magpie config            Configure display options",
-  "  /magpie config connection Configure gateway endpoint and auth",
+  "  /magpie config connection Set provider name and default URL",
   "  /magpie help              Show this help",
 ].join("\n");
 
@@ -152,8 +140,7 @@ export function registerMagpieCommand(pi: ExtensionAPI, runtime?: ProviderRuntim
           ctx.ui.notify("Usage: /magpie config [connection]", "warning");
           return;
         }
-        const action = await openProviderConfig(ctx, loadProviderSettings(ctx.cwd), loadConfig(ctx.cwd));
-        if (action === "connection") return runConfig(ctx);
+        await openProviderConfig(ctx, loadProviderSettings(ctx.cwd), loadConfig(ctx.cwd));
         return;
       }
       if (!["status", "refresh", "models"].includes(subcommand)) {
@@ -161,7 +148,7 @@ export function registerMagpieCommand(pi: ExtensionAPI, runtime?: ProviderRuntim
         return;
       }
       if (!runtime || !catalog) {
-        ctx.ui.notify("Magpie provider is unavailable. Run /magpie config and reload pi.", "error");
+        ctx.ui.notify("Magpie provider is unavailable. Run /login magpie and reload pi.", "error");
         return;
       }
       const config = loadConfig(ctx.cwd);
@@ -186,7 +173,7 @@ export function registerMagpieCommand(pi: ExtensionAPI, runtime?: ProviderRuntim
         return;
       }
       if (subcommand === "models") {
-        await openModelInspector(ctx, catalog, config.modelOverrides, loadProviderSettings(ctx.cwd).showStrictMode);
+        await openModelInspector(ctx, catalog, config, loadProviderSettings(ctx.cwd).showStrictMode);
         return;
       }
     },

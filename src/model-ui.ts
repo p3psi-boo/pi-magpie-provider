@@ -1,5 +1,5 @@
 import { DynamicBorder, getSettingsListTheme, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { Container, Key, matchesKey, type SelectItem, SelectList, type SettingItem, SettingsList, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, type SelectItem, SelectList, type SettingItem, SettingsList, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   CONTEXT_WINDOW_PRESETS,
   loadModelOverrideLayers,
@@ -7,7 +7,7 @@ import {
   saveModelOverride,
 } from "./config.ts";
 import type { ProviderCatalog } from "./catalog.ts";
-import { normalizeProviderModels } from "./registration.ts";
+import { toPiModels } from "./registration.ts";
 import { saveProviderSettings, type ProviderSettings } from "./settings.ts";
 import type {
   MagpieProviderConfig,
@@ -121,25 +121,15 @@ function modelSelectorItems(
   });
 }
 
-type ConfigTab = "Connection" | "Display";
-
-const CONFIG_TABS: ConfigTab[] = ["Connection", "Display"];
-
-function providerSettingsItems(
-  tab: ConfigTab,
-  settings: ProviderSettings,
-  connection: MagpieProviderConfig,
-): SettingItem[] {
-  if (tab === "Connection") {
-    return [{
-      id: "connection",
-      label: "Endpoint and authentication",
-      description: `${connection.providerName}  ${connection.baseUrl}  ${connection.authRequired ? "credentials required" : "no credentials"}`,
-      currentValue: "open",
-      values: ["open", "edit"],
-    }];
-  }
+function providerSettingsItems(settings: ProviderSettings, connection: MagpieProviderConfig): SettingItem[] {
   return [
+    {
+      id: "gateway",
+      label: "Gateway",
+      description: `${connection.providerName}  ${connection.baseUrl}  — change with /login ${connection.providerName}`,
+      currentValue: "ok",
+      values: ["ok"],
+    },
     {
       id: "showStrictMode",
       label: "Show strict tool schema",
@@ -150,34 +140,23 @@ function providerSettingsItems(
   ];
 }
 
-function nextTab(tab: ConfigTab, direction: 1 | -1): ConfigTab {
-  const index = CONFIG_TABS.indexOf(tab);
-  return CONFIG_TABS[(index + direction + CONFIG_TABS.length) % CONFIG_TABS.length] ?? "Connection";
-}
-
 export async function openProviderConfig(
   ctx: ExtensionCommandContext,
   settings: ProviderSettings,
   connection: MagpieProviderConfig,
-): Promise<"connection" | undefined> {
+): Promise<void> {
   if (ctx.mode !== "tui") {
     ctx.ui.notify("/magpie config requires interactive TUI mode.", "warning");
     return;
   }
 
   const edited: ProviderSettings = { ...settings };
-  const action = await ctx.ui.custom<"connection" | undefined>((tui, theme, _keybindings, done) => {
-    let activeTab: ConfigTab = "Connection";
-    let list: SettingsList;
-    const makeList = () => new SettingsList(
-      providerSettingsItems(activeTab, edited, connection),
+  await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+    const list = new SettingsList(
+      providerSettingsItems(edited, connection),
       8,
       getSettingsListTheme(),
       (id, value) => {
-        if (id === "connection" && value === "edit") {
-          done("connection");
-          return;
-        }
         if (id === "showStrictMode" && (value === "enabled" || value === "disabled")) {
           edited.showStrictMode = value === "enabled";
         }
@@ -187,42 +166,25 @@ export async function openProviderConfig(
       () => done(undefined),
       { enableSearch: true },
     );
-    list = makeList();
     return {
       render: (width) => {
         const border = theme.fg("border", "─".repeat(Math.max(0, width)));
-        const tabs = CONFIG_TABS.map((tab) => tab === activeTab
-          ? theme.fg("accent", theme.bold(tab))
-          : theme.fg("muted", tab));
         return [
           border,
-          `  ${tabs.join(theme.fg("muted", " / "))}`,
+          `  ${theme.fg("accent", theme.bold("Display"))}`,
           border,
           ...list.render(width),
-          theme.fg("dim", "  Enter/Space changes  Tab switches sections  Esc saves and reloads Pi"),
+          theme.fg("dim", "  Enter/Space changes  Esc saves and reloads Pi"),
           border,
         ].map((line) => truncateToWidth(line, width, ""));
       },
       invalidate: () => list.invalidate(),
       handleInput: (data) => {
-        if (matchesKey(data, Key.tab)) {
-          activeTab = nextTab(activeTab, 1);
-          list = makeList();
-          tui.requestRender();
-          return;
-        }
-        if (matchesKey(data, Key.shift("tab"))) {
-          activeTab = nextTab(activeTab, -1);
-          list = makeList();
-          tui.requestRender();
-          return;
-        }
         list.handleInput(data);
       },
     };
   });
 
-  if (action === "connection") return action;
   if (JSON.stringify(settings) === JSON.stringify(edited)) return;
   try {
     const path = saveProviderSettings(ctx.cwd, edited);
@@ -237,7 +199,7 @@ export async function openProviderConfig(
 export async function openModelInspector(
   ctx: ExtensionCommandContext,
   catalog: ProviderCatalog,
-  overrides: Record<string, ProviderModelOverride>,
+  config: MagpieProviderConfig,
   showStrictMode: boolean,
 ): Promise<void> {
   if (ctx.mode !== "tui") {
@@ -246,9 +208,10 @@ export async function openModelInspector(
   }
 
   const snapshot = catalog.current() ?? await catalog.load();
-  const models = normalizeProviderModels(snapshot.built.models);
+  const models = toPiModels(config, snapshot.built.models);
+  const overrides = config.modelOverrides;
   if (models.length === 0) {
-    ctx.ui.notify("No available models in the current magpie snapshot. Run /magpie refresh first.", "warning");
+    ctx.ui.notify("No available models in the current magpie snapshot. Run /login magpie or /magpie refresh first.", "warning");
     return;
   }
 

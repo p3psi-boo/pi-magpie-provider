@@ -224,6 +224,41 @@ export function writeConfigFile(path: string, config: ConfigLayer): void {
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
+const TRAILING_SLASHES = /\/+$/u;
+
+export function normalizeMagpieBaseUrl(value: string, fallback = DEFAULT_CONFIG.baseUrl): string {
+  const trimmed = value.trim() || fallback;
+  const withoutSlash = trimmed.replace(TRAILING_SLASHES, "");
+  try {
+    const url = new URL(withoutSlash);
+    if (url.pathname === "" || url.pathname === "/") return `${url.origin}/v1`;
+    return withoutSlash;
+  } catch {
+    return withoutSlash || fallback;
+  }
+}
+
+export function persistGatewayConnection(
+  config: MagpieProviderConfig,
+  patch: Partial<Pick<MagpieProviderConfig, "providerName" | "baseUrl" | "authRequired" | "authHeader">>,
+): string {
+  if (patch.providerName !== undefined) config.providerName = patch.providerName;
+  if (patch.baseUrl !== undefined) config.baseUrl = patch.baseUrl;
+  if (patch.authRequired !== undefined) config.authRequired = patch.authRequired;
+  if (patch.authHeader !== undefined) config.authHeader = patch.authHeader;
+  Object.assign(config, normalizeConfig(config));
+
+  const path = globalConfigPath();
+  const existing = readConfigFile(path) ?? {};
+  writeConfigFile(path, {
+    ...existing,
+    ...patch,
+    authHeader: config.authHeader,
+    authRequired: config.authRequired,
+  });
+  return path;
+}
+
 export function loadModelOverrideLayers(cwd: string): {
   global: ProviderModelOverrideLayers;
   project: ProviderModelOverrideLayers;
