@@ -15,10 +15,11 @@ pi install git:github.com/p3psi-boo/pi-magpie-provider@master
 Restart pi after installing, then run:
 
 ```text
-/magpie config
 /login magpie
 /model
 ```
+
+`/login magpie` asks for the gateway URL (default `http://127.0.0.1:3425/v1`) and an optional API key, then checks `GET /v1/models`. That is the only setup step for Docker and remote magpie.
 
 ## Install for local testing
 
@@ -38,13 +39,13 @@ pi -e . --list-models magpie
 
 ## Configure
 
-Run the interactive command:
+Run Pi's provider login:
 
 ```text
-/magpie config
+/login magpie
 ```
 
-It writes global connection/auth config to:
+It stores the gateway URL and key in `~/.pi/agent/auth.json`, and writes the URL to:
 
 ```text
 ~/.pi/agent/pi-magpie-provider/config.json
@@ -60,13 +61,13 @@ PI_MAGPIE_AUTH_HEADER
 PI_MAGPIE_API_KEY
 ```
 
-Default base URL is `http://127.0.0.1:3425/v1`. Docker and LAN sharing usually need a reachable host and a magpie gateway key (`/login magpie`).
+Default base URL is `http://127.0.0.1:3425/v1`. Docker and LAN sharing usually need a reachable host and a magpie gateway key, both collected by `/login magpie`.
 
 Project config supports bounded per-model overrides (`reasoning`, `contextWindow`, `maxTokens`). Connection and auth settings must be set in global config or environment variables.
 
 ### Display configuration
 
-Run `/magpie config` in Pi TUI mode to edit package-level `settings.json` values. The tabbed panel has `Connection` and `Display` sections.
+Run `/magpie config` in Pi TUI mode to edit package-level `settings.json` values. Gateway URL and API key stay on `/login magpie`; `/magpie config connection` only changes the provider name and default URL.
 
 ```json
 {
@@ -78,35 +79,37 @@ Run `/magpie config` in Pi TUI mode to edit package-level `settings.json` values
 
 ## Authenticate
 
-Use pi's normal API-key login flow:
+Use Pi's provider login. It collects the gateway URL and key together:
 
 ```text
 /login magpie
 ```
 
-Or:
+Or set the same values in the environment:
 
 ```bash
+export PI_MAGPIE_BASE_URL=http://127.0.0.1:3425/v1
 export PI_MAGPIE_API_KEY=your-gateway-key
 ```
 
 ## Commands
 
 ```text
-/magpie config             # tabbed connection and display configuration
+/login magpie              # gateway URL + API key, then catalog check
 /magpie status             # show snapshot and capabilities
 /magpie refresh            # refresh GET /v1/models and update pi immediately
 /magpie models             # inspect effective model settings and set bounded overrides
-/magpie config connection  # open endpoint and authentication editor
+/magpie config             # display options
+/magpie config connection  # provider name and default URL
 ```
 
 ## How discovery works
 
-Startup registers the provider immediately from the last-known-good local snapshot under `~/.cache/pi-magpie-provider/`. It then refreshes magpie availability in the background with a short timeout and updates the provider dynamically if the model list changed. On a first run, Pi registers a placeholder until background discovery succeeds.
+Startup registers the last-known-good local snapshot under `~/.cache/pi-magpie-provider/`. Pi then refreshes magpie availability; `/login magpie` also fetches the catalog while checking the key, so a separate `/magpie refresh` is not part of setup.
 
-Failed refreshes retain the last-known-good snapshot. Image and video catalog entries are not registered as chat models.
+Failed refreshes retain the last-known-good snapshot. Image and video catalog entries are not registered as chat models. An empty catalog before login is expected: the provider still appears under `/login magpie`.
 
-When automatic discovery or discovery after login fails, Pi displays a warning with the model discovery URL and error reason (including the underlying connection error when available). Warnings raised before the session UI is ready are displayed when the session starts. If no snapshot exists, the warning explains that `login-required` is a placeholder and does not establish that the API key is invalid. Check the gateway connection and retry with `/magpie refresh`.
+When automatic discovery fails, Pi displays a warning with the model discovery URL and error reason (including the underlying connection error when available). Warnings raised before the session UI is ready are displayed when the session starts. Check the gateway connection and retry with `/login magpie` or `/magpie refresh`.
 
 ## Test
 

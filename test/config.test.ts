@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   mergeConfigLayers,
   DEFAULT_CONFIG,
+  normalizeMagpieBaseUrl,
+  persistGatewayConnection,
   projectConfigPath,
   readConfigFile,
   readProjectConfigFile,
@@ -163,6 +165,31 @@ test("environment overrides global endpoint even when project endpoint is ignore
   );
 
   assert.equal(config.baseUrl, "http://env-trusted.example/v1");
+});
+
+test("normalizes a host-only magpie URL to the OpenAI-compatible /v1 root", () => {
+  assert.equal(normalizeMagpieBaseUrl("http://192.168.1.8:3425"), "http://192.168.1.8:3425/v1");
+  assert.equal(normalizeMagpieBaseUrl("http://192.168.1.8:3425/v1/"), "http://192.168.1.8:3425/v1");
+  assert.equal(normalizeMagpieBaseUrl("https://magpie.example/proxy/v1"), "https://magpie.example/proxy/v1");
+  assert.equal(normalizeMagpieBaseUrl("", "http://fallback.test/v1"), "http://fallback.test/v1");
+});
+
+test("persistGatewayConnection writes URL into global config and mutates the live object", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pi-magpie-persist-"));
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = home;
+    const live = mergeConfigLayers(undefined, undefined, {});
+    persistGatewayConnection(live, { baseUrl: "http://gw.example/v1", authRequired: true, authHeader: true });
+    assert.equal(live.baseUrl, "http://gw.example/v1");
+    const saved = readConfigFile(join(home, ".pi", "agent", "pi-magpie-provider", "config.json"));
+    assert.equal(saved?.baseUrl, "http://gw.example/v1");
+    assert.equal(saved?.authRequired, true);
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 test("rejects malformed config values with actionable errors", async () => {

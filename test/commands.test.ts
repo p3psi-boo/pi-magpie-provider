@@ -23,6 +23,7 @@ test("help documents every advertised command without requiring an available pro
   await command.handler("help", ctx);
 
   assert.equal(notifications[0].level, "info");
+  assert.match(notifications[0].message, /\/login magpie/);
   for (const value of ["status", "refresh", "models", "config", "config connection", "help"]) {
     assert.match(notifications[0].message, new RegExp(`/magpie ${value.replace(" ", "\\s+")}`));
   }

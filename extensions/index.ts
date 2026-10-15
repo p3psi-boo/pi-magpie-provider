@@ -2,8 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { DEFAULT_CONFIG, loadConfig } from "../src/config.ts";
 import { ProviderCatalog } from "../src/catalog.ts";
 import { ProviderRuntime } from "../src/runtime.ts";
-import { buildProviderRegistration } from "../src/registration.ts";
-import { buildUnavailableProviderModels } from "../src/provider.ts";
+import { createMagpieProvider } from "../src/registration.ts";
 import { registerMagpieCommand } from "../src/commands.ts";
 import { getDiscoveryApiKey } from "../src/auth.ts";
 import { registerCodexCompatiblePayloadAdapter } from "../src/codex-compat.ts";
@@ -34,7 +33,11 @@ export default async function (pi: ExtensionAPI) {
   } catch (error) {
     registerCodexCompatiblePayloadAdapter(pi, config.providerName);
     registerMagpieCommand(pi);
-    pi.registerProvider(config.providerName, buildProviderRegistration(config, buildUnavailableProviderModels()).config);
+    const catalog = new ProviderCatalog({
+      config,
+      getApiKey: () => getDiscoveryApiKey(config.providerName),
+    });
+    pi.registerProvider(createMagpieProvider({ config, catalog }));
     console.warn(`[pi-magpie-provider] registered placeholder provider after startup failure: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

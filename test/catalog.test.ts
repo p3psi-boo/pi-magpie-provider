@@ -225,6 +225,30 @@ test("deduplicated callers can abort without cancelling the shared refresh", asy
   });
 });
 
+test("ingest writes a snapshot that load can restore", async () => {
+  await withTempHome(async () => {
+    const instance = catalog();
+    const models = [{
+      id: "ingested",
+      name: "ingested",
+      kind: "chat" as const,
+      reasoning: false,
+      efforts: [],
+      nativeEndpoints: [],
+      inputModalities: ["text"],
+      knowsImageInput: false,
+    }];
+
+    const snapshot = await instance.ingest(models, 4321);
+    assert.equal(snapshot.built.models[0]?.id, "ingested");
+    assert.equal(snapshot.magpieUpdatedAt, 4321);
+
+    const reloaded = await catalog().load();
+    assert.equal(reloaded.built.models[0]?.id, "ingested");
+    assert.equal(reloaded.magpieUpdatedAt, 4321);
+  });
+});
+
 test("refresh propagates the initiating caller's cancellation reason", async () => {
   await withTempHome(async () => {
     const instance = catalog();

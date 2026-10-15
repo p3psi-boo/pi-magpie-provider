@@ -9,5 +9,5 @@ test("status failure includes configuration and next steps", () => {
   assert.match(message, /Magpie status failed: fetch failed/);
   assert.match(message, /Provider: magpie/);
   assert.match(message, /Base URL: http:\/\/127\.0\.0\.1:3425\/v1/);
-  assert.match(message, /Run \/magpie config/);
+  assert.match(message, /Run \/login magpie/);
 });

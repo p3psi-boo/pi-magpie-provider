@@ -97,6 +97,11 @@ export class ProviderCatalog {
     return this.snapshot;
   }
 
+  async ingest(models: MagpieModel[], fetchedAt = Date.now()): Promise<CatalogSnapshot> {
+    await (this.options.writeSnapshot ?? writeCache)(magpieModelsCachePath(this.options.config), models, fetchedAt);
+    return this.setSnapshot(models, fetchedAt);
+  }
+
   private async waitForActiveRefresh(signal?: AbortSignal): Promise<CatalogRefreshResult> {
     const refresh = this.activeRefresh;
     if (!refresh) throw new Error("No active refresh");

@@ -17,7 +17,17 @@ async function withTempCwd<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
   }
 }
 
-test("extension registers provider with refreshModels capability", async () => {
+function captureProvider(register: (provider: any) => void) {
+  return (providerOrName: any, maybeConfig?: any) => {
+    if (typeof providerOrName === "string") {
+      register({ id: providerOrName, ...maybeConfig, getModels: () => maybeConfig?.models ?? [] });
+      return;
+    }
+    register(providerOrName);
+  };
+}
+
+test("extension registers a native provider with login and refreshModels", async () => {
   const home = await mkdtemp(join(tmpdir(), "pi-magpie-extension-lifecycle-home-"));
   const originalHome = process.env.HOME;
   const originalFetch = globalThis.fetch;
@@ -36,25 +46,28 @@ test("extension registers provider with refreshModels capability", async () => {
     }) as typeof fetch;
 
     await withTempCwd(async () => {
-      const providers: Array<{ name: string; config: any }> = [];
+      const providers: any[] = [];
       await extension({
         registerCommand: () => {},
-        registerProvider: (name: string, config: any) => providers.push({ name, config }),
+        registerProvider: captureProvider((provider) => providers.push(provider)),
         on: () => {},
       } as any);
 
-      assert.equal(providers[0].config.models[0].id, "login-required");
-      assert.equal(typeof providers[0].config.refreshModels, "function");
+      assert.equal(providers[0].id, "magpie");
+      assert.equal(typeof providers[0].auth.apiKey.login, "function");
+      assert.equal(typeof providers[0].refreshModels, "function");
+      assert.deepEqual(providers[0].getModels(), []);
 
-      const refreshed = await providers[0].config.refreshModels({
+      await providers[0].refreshModels({
         allowNetwork: true,
         signal: new AbortController().signal,
+        credential: { type: "api_key", key: "test-key" },
         publish: async () => true,
       });
-      assert.equal(refreshed[0].id, "fresh-model");
-      assert.equal(refreshed[0].api, "openai-responses");
-      assert.equal(refreshed[0].contextWindow, 272000);
-      assert.equal(refreshed[0].compat?.supportsStrictMode, false);
+      assert.equal(providers[0].getModels()[0].id, "fresh-model");
+      assert.equal(providers[0].getModels()[0].api, "openai-responses");
+      assert.equal(providers[0].getModels()[0].contextWindow, 272000);
+      assert.equal(providers[0].getModels()[0].compat?.supportsStrictMode, false);
       assert.equal(providers.length, 1);
     });
   } finally {
@@ -116,7 +129,7 @@ test("manual refresh uses the active model registry credential", async () => {
   }
 });
 
-test("extension registers placeholder provider when global config is invalid", async () => {
+test("extension registers a login-capable provider when global config is invalid", async () => {
   const home = await mkdtemp(join(tmpdir(), "pi-magpie-extension-home-"));
   const originalHome = process.env.HOME;
 
@@ -127,17 +140,17 @@ test("extension registers placeholder provider when global config is invalid", a
       await mkdir(configDir, { recursive: true });
       await writeFile(join(configDir, "config.json"), JSON.stringify({ headers: null }));
 
-      const providers: Array<{ name: string; config: any }> = [];
+      const providers: any[] = [];
       await extension({
         registerCommand: () => {},
-        registerProvider: (name: string, config: any) => providers.push({ name, config }),
+        registerProvider: captureProvider((provider) => providers.push(provider)),
         on: () => {},
       } as any);
 
       assert.equal(providers.length, 1);
-      assert.equal(providers[0].name, "magpie");
-      assert.equal(providers[0].config.models[0].id, "login-required");
-      assert.equal(providers[0].config.models[0].compat.supportsStrictMode, false);
+      assert.equal(providers[0].id, "magpie");
+      assert.equal(typeof providers[0].auth.apiKey.login, "function");
+      assert.deepEqual(providers[0].getModels(), []);
     });
   } finally {
     if (originalHome === undefined) delete process.env.HOME;
@@ -167,7 +180,7 @@ test("discovery failures notify the session UI before and after startup, while s
       const notifications: Array<{ message: string; level: string }> = [];
       await extension({
         registerCommand: () => {},
-        registerProvider: (_name: string, config: any) => { provider = config; },
+        registerProvider: captureProvider((registered) => { provider = registered; }),
         on: (event: string, handler: any) => {
           if (event === "session_start") sessionStart = handler;
         },
@@ -176,9 +189,10 @@ test("discovery failures notify the session UI before and after startup, while s
         allowNetwork: true,
         signal: new AbortController().signal,
         credential: { type: "api_key", key: "test-key" },
+        publish: async () => true,
       });
-      const models = await refresh();
-      assert.equal(models[0].id, "login-required");
+      await refresh();
+      assert.deepEqual(provider.getModels(), []);
       assert.equal(notifications.length, 0);
       await sessionStart({}, {
         ui: { notify: (message: string, level: string) => notifications.push({ message, level }) },
@@ -187,8 +201,7 @@ test("discovery failures notify the session UI before and after startup, while s
       assert.equal(notifications[0].level, "warning");
       assert.match(notifications[0].message, /http:\/\/127\.0\.0\.1:3425\/v1\/models/);
       assert.match(notifications[0].message, /connection reset by peer \(ECONNRESET\)/);
-      assert.match(notifications[0].message, /login-required is a placeholder/);
-      assert.match(notifications[0].message, /\/magpie refresh/);
+      assert.match(notifications[0].message, /\/login magpie/);
       assert.doesNotMatch(notifications[0].message, /test-key/);
       await sessionStart({}, {
         ui: { notify: (message: string, level: string) => notifications.push({ message, level }) },
@@ -197,7 +210,8 @@ test("discovery failures notify the session UI before and after startup, while s
       await refresh();
       assert.equal(notifications.length, 2, "subsequent failures notify immediately");
       fail = false;
-      assert.equal((await refresh())[0].id, "fresh-model");
+      await refresh();
+      assert.equal(provider.getModels()[0].id, "fresh-model");
       assert.equal(notifications.length, 2, "successful discovery does not warn");
     });
   } finally {
